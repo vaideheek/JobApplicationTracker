@@ -106,3 +106,21 @@ export const STATUS_COLORS: Record<ApplicationStatus, string> = {
   REJECTED: 'bg-red-100 text-red-800',
   WITHDRAWN: 'bg-gray-100 text-gray-600',
 };
+
+export interface EmailParseRequest {
+  rawEmailText: string;
+}
+
+export interface EmailParseResponse {
+  companyName: string;
+  jobTitle: string;
+  status: ApplicationStatus;
+  stage: string | null;
+  recruiterEmail: string | null;
+  source: string | null;
+  importantDate: string | null;
+  suggestedNotes: string | null;
+  confidenceScore: 'HIGH' | 'MEDIUM' | 'LOW';
+  needsReview: boolean;
+}
+

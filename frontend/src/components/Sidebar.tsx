@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, List, PlusCircle, Briefcase } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Briefcase, Mail } from 'lucide-react';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/applications', label: 'Applications', icon: List },
   { to: '/applications/new', label: 'Add New', icon: PlusCircle },
+  { to: '/email-import', label: 'Email Import', icon: Mail },
 ];
 
 export default function Sidebar() {

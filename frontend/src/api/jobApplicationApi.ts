@@ -5,6 +5,8 @@ import type {
   DashboardStats,
   PageResponse,
   ApplicationStatus,
+  EmailParseRequest,
+  EmailParseResponse,
 } from '../types';
 
 const api = axios.create({
@@ -49,5 +51,16 @@ export const jobApplicationApi = {
 
   delete: async (id: number): Promise<void> => {
     await api.delete(`/applications/${id}`);
+  },
+
+  // Email Import
+  parseEmail: async (request: EmailParseRequest): Promise<EmailParseResponse> => {
+    const { data } = await api.post('/email-import/parse', request);
+    return data;
+  },
+
+  confirmEmailImport: async (response: EmailParseResponse): Promise<JobApplication> => {
+    const { data } = await api.post('/email-import/confirm', response);
+    return data;
   },
 };

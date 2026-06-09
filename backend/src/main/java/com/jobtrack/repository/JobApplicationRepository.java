@@ -10,9 +10,12 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.Optional;
 
 @Repository
 public interface JobApplicationRepository extends JpaRepository<JobApplication, Long> {
+
+    Optional<JobApplication> findByCompanyNameIgnoreCaseAndJobTitleIgnoreCase(String companyName, String jobTitle);
 
     long countByStatus(ApplicationStatus status);
 

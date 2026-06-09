@@ -128,7 +128,7 @@ public class JobApplicationService {
                 .build();
     }
 
-    private JobApplicationResponse mapToResponse(JobApplication entity) {
+    JobApplicationResponse mapToResponse(JobApplication entity) {
         return JobApplicationResponse.builder()
                 .id(entity.getId())
                 .companyName(entity.getCompanyName())
@@ -151,7 +151,7 @@ public class JobApplicationService {
                 .build();
     }
 
-    private JobApplicationResponse mapToResponseWithHistory(JobApplication entity) {
+    JobApplicationResponse mapToResponseWithHistory(JobApplication entity) {
         JobApplicationResponse response = mapToResponse(entity);
         List<StatusHistoryResponse> history = statusHistoryRepository
                 .findByJobApplicationIdOrderByChangedAtDesc(entity.getId())

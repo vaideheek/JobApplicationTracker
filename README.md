@@ -159,3 +159,62 @@ docker compose down -v
 - [ ] Resume/document attachments
 - [ ] Interview scheduling
 - [ ] Analytics and reporting
+
+---
+
+## Testing Email Import (Sample Templates)
+
+You can copy and paste the following templates into the **Email Import** page to test different status extractions:
+
+### 1. Application Confirmation
+```text
+Subject: Application Received: Software Engineer at Google
+From: careers@google.com
+To: candidate@gmail.com
+Date: 2026-06-09
+
+Hi Candidate,
+Thank you for applying for the Software Engineer position at Google. We have successfully received your application. Our recruiting team will review your qualifications and contact you if there is a match.
+```
+
+### 2. Interview Invite
+```text
+Subject: Interview Schedule for Frontend Developer at Meta
+From: recruiter@meta.com
+To: candidate@gmail.com
+Date: 2026-06-12
+
+Hi Candidate,
+We are impressed by your background and would like to schedule a phone screen interview for the Frontend Developer role at Meta. Please let us know your availability for a Zoom call on June 20, 2026.
+```
+
+### 3. Assessment Invite
+```text
+Subject: Coding Assessment for Data Scientist position at Apple
+From: recruiter@apple.com
+To: candidate@gmail.com
+Date: 2026-06-14
+
+Hi Candidate,
+Thanks for your interest in the Data Scientist role at Apple. The next step in our process is an online assessment. Please complete the HackerRank challenge by June 18, 2026.
+```
+
+### 4. Rejection
+```text
+Subject: Your application to Stripe
+From: careers@stripe.com
+To: candidate@gmail.com
+
+Hi Candidate,
+Thank you for applying for the Solutions Architect position at Stripe. Unfortunately, after careful review of your application, we have decided not to move forward with your candidacy at this time as we are pursuing other candidates. We wish you the best of luck in your job search.
+```
+
+### 5. Offer
+```text
+Subject: Job Offer: Product Manager at Netflix
+From: recruiter@netflix.com
+To: candidate@gmail.com
+
+Hi Candidate,
+We are pleased to offer you the position of Product Manager at Netflix. We were incredibly impressed by your interviews and are excited to have you join the team! Please find your formal offer letter attached.
+```
