@@ -132,3 +132,29 @@ export interface PrioritySuggestionResponse {
   explanation: string;
 }
 
+export interface CompanyAppCount {
+  companyName: string;
+  count: number;
+}
+
+export interface RecommendedAction {
+  type: 'FOLLOW_UP' | 'INTERVIEW_PREP' | 'ASSESSMENT_COMPLETE' | 'REVIEW_STALE';
+  applicationId: number;
+  companyName: string;
+  jobTitle: string;
+  message: string;
+  detail: string;
+}
+
+export interface DashboardInsightsResponse {
+  highPriorityCount: number;
+  followUpNeededCount: number;
+  upcomingInterviewsCount: number;
+  staleApplicationsCount: number;
+  topCompanies: CompanyAppCount[];
+  responseRate: number;
+  interviewConversionRate: number;
+  offerConversionRate: number;
+  recommendedActions: RecommendedAction[];
+}
+

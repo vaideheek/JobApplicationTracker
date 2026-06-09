@@ -1,5 +1,6 @@
 package com.jobtrack.controller;
 
+import com.jobtrack.dto.DashboardInsightsResponse;
 import com.jobtrack.dto.DashboardStats;
 import com.jobtrack.service.DashboardService;
 import lombok.RequiredArgsConstructor;
@@ -18,5 +19,10 @@ public class DashboardController {
     @GetMapping("/stats")
     public ResponseEntity<DashboardStats> getStats() {
         return ResponseEntity.ok(dashboardService.getStats());
+    }
+
+    @GetMapping("/insights")
+    public ResponseEntity<DashboardInsightsResponse> getInsights() {
+        return ResponseEntity.ok(dashboardService.getInsights());
     }
 }

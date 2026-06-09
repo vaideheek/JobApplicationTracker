@@ -98,6 +98,7 @@ JobApplicationTracker/
 | Method | Endpoint                | Description              |
 |--------|-------------------------|--------------------------|
 | GET    | `/api/dashboard/stats`  | Dashboard statistics     |
+| GET    | `/api/dashboard/insights`| Dashboard insights & analytics |
 | GET    | `/api/applications`     | List applications (paginated, filterable) |
 | GET    | `/api/applications/:id` | Get application detail   |
 | POST   | `/api/applications`     | Create application       |
@@ -152,6 +153,25 @@ JobTrack automatically evaluates application fields to suggest a priority level:
 - **MEDIUM**: Suggested if:
   - Salary range is specified (as a baseline minimum).
   - Fallback default (if no other rules apply).
+
+## Dashboard Insights & Recommended Actions
+
+JobTrack includes an analytics and action layer on the main Dashboard:
+- **Insights Cards**:
+  - *High Priority*: Total applications marked with HIGH priority.
+  - *Follow-ups Needed*: Active applications (not REJECTED, WITHDRAWN, or OFFER) where follow-up date is in the past.
+  - *Upcoming Interviews*: Applications with status `INTERVIEW` where the follow-up date is between today and today + 14 days (inclusive).
+  - *Stale Applications*: Active applications that have not been updated in 14+ days.
+- **Conversion Rates & Analytics**:
+  - *Response Rate*: `(ASSESSMENT + INTERVIEW + OFFER + REJECTED) / total * 100` (excludes `IN_REVIEW` and `APPLIED`).
+  - *Interview Conversion Rate*: Unique applications that reached `INTERVIEW` status divided by total applications.
+  - *Offer Conversion Rate*: Unique applications that reached `OFFER` status divided by total applications.
+  - *Top Companies*: Ranked list of top 5 companies by application counts.
+- **Recommended Actions Widget**:
+  Generates up to 6 of the most urgent recommendations, sorted by:
+  1. *Overdue follow-ups first* (oldest follow-up date first).
+  2. *Upcoming interviews/assessments next* (soonest date first).
+  3. *Stale applications last* (longest stale application first).
 
 ## Stopping the App
 

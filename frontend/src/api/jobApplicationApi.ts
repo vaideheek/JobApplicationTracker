@@ -8,6 +8,7 @@ import type {
   EmailParseRequest,
   EmailParseResponse,
   PrioritySuggestionResponse,
+  DashboardInsightsResponse,
 } from '../types';
 
 const api = axios.create({
@@ -67,6 +68,11 @@ export const jobApplicationApi = {
 
   suggestPriority: async (request: JobApplicationRequest): Promise<PrioritySuggestionResponse> => {
     const { data } = await api.post('/applications/suggest-priority', request);
+    return data;
+  },
+
+  getInsights: async (): Promise<DashboardInsightsResponse> => {
+    const { data } = await api.get('/dashboard/insights');
     return data;
   },
 };
