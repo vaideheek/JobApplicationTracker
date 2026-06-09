@@ -3,6 +3,8 @@ package com.jobtrack.controller;
 import com.jobtrack.dto.JobApplicationRequest;
 import com.jobtrack.dto.JobApplicationResponse;
 import com.jobtrack.enums.ApplicationStatus;
+import com.jobtrack.dto.PrioritySuggestionResponse;
+import com.jobtrack.service.PrioritySuggestionService;
 import com.jobtrack.service.JobApplicationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 public class JobApplicationController {
 
     private final JobApplicationService jobApplicationService;
+    private final PrioritySuggestionService prioritySuggestionService;
 
     @GetMapping
     public ResponseEntity<Page<JobApplicationResponse>> getAllApplications(
@@ -63,5 +66,11 @@ public class JobApplicationController {
     public ResponseEntity<Void> deleteApplication(@PathVariable Long id) {
         jobApplicationService.deleteApplication(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/suggest-priority")
+    public ResponseEntity<PrioritySuggestionResponse> suggestPriority(
+            @RequestBody JobApplicationRequest request) {
+        return ResponseEntity.ok(prioritySuggestionService.suggestPriority(request));
     }
 }

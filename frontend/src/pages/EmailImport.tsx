@@ -14,8 +14,8 @@ import {
   Check
 } from 'lucide-react';
 import { jobApplicationApi } from '../api/jobApplicationApi';
-import { STATUS_OPTIONS, STATUS_LABELS } from '../types';
-import type { EmailParseResponse, ApplicationStatus, JobApplication } from '../types';
+import { STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS } from '../types';
+import type { EmailParseResponse, ApplicationStatus, JobApplication, ApplicationPriority } from '../types';
 
 export default function EmailImport() {
   const navigate = useNavigate();
@@ -39,6 +39,9 @@ export default function EmailImport() {
     suggestedNotes: '',
     confidenceScore: 'LOW',
     needsReview: true,
+    priority: undefined,
+    suggestedPriority: undefined,
+    priorityExplanation: '',
   });
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -67,6 +70,9 @@ export default function EmailImport() {
         source: result.source || 'Email',
         importantDate: result.importantDate || '',
         suggestedNotes: result.suggestedNotes || '',
+        priority: result.priority || undefined,
+        suggestedPriority: result.suggestedPriority || undefined,
+        priorityExplanation: result.priorityExplanation || '',
       });
       setStep('preview');
     } catch (err: any) {
@@ -327,6 +333,29 @@ export default function EmailImport() {
                       value={formData.importantDate || ''}
                       onChange={(e) => setFormData({ ...formData, importantDate: e.target.value })}
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                      Priority Suggestion
+                    </label>
+                    <select
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      value={formData.priority || ''}
+                      onChange={(e) => setFormData({ ...formData, priority: e.target.value as ApplicationPriority })}
+                    >
+                      <option value="">Select priority</option>
+                      {PRIORITY_OPTIONS.map((p) => (
+                        <option key={p} value={p}>
+                          {p.charAt(0) + p.slice(1).toLowerCase()}
+                        </option>
+                      ))}
+                    </select>
+                    {formData.priorityExplanation && (
+                      <p className="mt-1 text-xs text-slate-500 italic">
+                        Suggested {formData.suggestedPriority ? formData.suggestedPriority.charAt(0) + formData.suggestedPriority.slice(1).toLowerCase() : ''} because: {formData.priorityExplanation}
+                      </p>
+                    )}
                   </div>
                 </div>
 

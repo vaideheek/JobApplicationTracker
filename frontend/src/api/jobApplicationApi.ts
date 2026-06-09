@@ -7,6 +7,7 @@ import type {
   ApplicationStatus,
   EmailParseRequest,
   EmailParseResponse,
+  PrioritySuggestionResponse,
 } from '../types';
 
 const api = axios.create({
@@ -61,6 +62,11 @@ export const jobApplicationApi = {
 
   confirmEmailImport: async (response: EmailParseResponse): Promise<JobApplication> => {
     const { data } = await api.post('/email-import/confirm', response);
+    return data;
+  },
+
+  suggestPriority: async (request: JobApplicationRequest): Promise<PrioritySuggestionResponse> => {
+    const { data } = await api.post('/applications/suggest-priority', request);
     return data;
   },
 };

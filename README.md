@@ -10,6 +10,8 @@ A modern full-stack job application tracker built with React + Vite + TypeScript
 - **Application Detail** — Full details view with notes and status change timeline
 - **Search & Filter** — Search by company name or job title, filter by status
 - **Status Tracking** — Automatic timeline of status changes (Applied → Interview → Offer, etc.)
+- **Priority Suggestions** — Automatic priority suggestions (`LOW`, `MEDIUM`, `HIGH`) based on status, upcoming dates (interviews or deadlines within 7 days), referrals, and target companies, with an interactive preview and click-to-accept logic on manual entry and email imports.
+
 
 ## Tech Stack
 
@@ -136,6 +138,20 @@ JobApplicationTracker/
 ## Status Options
 
 `APPLIED` · `IN_REVIEW` · `ASSESSMENT` · `INTERVIEW` · `OFFER` · `REJECTED` · `WITHDRAWN`
+
+## Priority Suggestion Rules
+
+JobTrack automatically evaluates application fields to suggest a priority level:
+- **LOW**: Suggested if status is `REJECTED` or `WITHDRAWN` (this status always overrides all other rules).
+- **HIGH**: Suggested if any of the following apply (in order of highest precedence):
+  - Status is `OFFER`, `INTERVIEW`, or `ASSESSMENT`.
+  - Follow-up or Interview date is within 7 days (today through today + 7 days).
+  - Application deadline date is within 7 days (today through today + 7 days).
+  - Source contains "Referral" (case-insensitive).
+  - Company name matches our target list (e.g. Google, Microsoft, Amazon, Meta, Apple, Arm, JetBrains, Deloitte, SAP, Spotify, revolut, Bloomberg, JPMorgan, Goldman Sachs, etc.).
+- **MEDIUM**: Suggested if:
+  - Salary range is specified (as a baseline minimum).
+  - Fallback default (if no other rules apply).
 
 ## Stopping the App
 

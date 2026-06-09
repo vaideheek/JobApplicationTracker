@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS } from '../types';
 import type { JobApplicationRequest, ApplicationStatus, ApplicationPriority } from '../types';
+import { jobApplicationApi } from '../api/jobApplicationApi';
 
 interface ApplicationFormProps {
   initialData?: JobApplicationRequest;
@@ -34,6 +35,20 @@ export default function ApplicationForm({
   const [form, setForm] = useState<JobApplicationRequest>(initialData || emptyForm);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [suggestion, setSuggestion] = useState<{ priority: ApplicationPriority; explanation: string } | null>(null);
+
+  useEffect(() => {
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const res = await jobApplicationApi.suggestPriority(form);
+        setSuggestion(res);
+      } catch (err) {
+        console.error('Failed to get priority suggestion', err);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounce);
+  }, [form.companyName, form.status, form.source, form.salaryRange, form.followUpDate, form.deadlineDate]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -204,6 +219,26 @@ export default function ApplicationForm({
               <option key={p} value={p}>{p.charAt(0) + p.slice(1).toLowerCase()}</option>
             ))}
           </select>
+          {suggestion && (
+            <div className="mt-1.5 flex flex-col gap-1 text-xs text-slate-500">
+              <span>
+                Suggested priority:{' '}
+                <span className="font-semibold text-brand-700">
+                  {suggestion.priority.charAt(0) + suggestion.priority.slice(1).toLowerCase()}
+                </span>
+                <span className="italic block mt-0.5">({suggestion.explanation})</span>
+              </span>
+              {form.priority !== suggestion.priority && (
+                <button
+                  type="button"
+                  onClick={() => setForm((prev) => ({ ...prev, priority: suggestion.priority }))}
+                  className="w-fit text-brand-600 font-medium hover:underline hover:text-brand-700"
+                >
+                  Accept suggestion
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

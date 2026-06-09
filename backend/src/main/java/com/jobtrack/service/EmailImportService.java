@@ -3,6 +3,7 @@ package com.jobtrack.service;
 import com.jobtrack.dto.EmailParseRequest;
 import com.jobtrack.dto.EmailParseResponse;
 import com.jobtrack.dto.JobApplicationResponse;
+import com.jobtrack.dto.PrioritySuggestionResponse;
 import com.jobtrack.entity.JobApplication;
 import com.jobtrack.entity.StatusHistory;
 import com.jobtrack.enums.ApplicationStatus;
@@ -24,9 +25,15 @@ public class EmailImportService {
     private final StatusHistoryRepository statusHistoryRepository;
     private final EmailParser emailParser;
     private final JobApplicationService jobApplicationService;
+    private final PrioritySuggestionService prioritySuggestionService;
 
     public EmailParseResponse parseEmail(EmailParseRequest request) {
-        return emailParser.parse(request.getRawEmailText());
+        EmailParseResponse response = emailParser.parse(request.getRawEmailText());
+        PrioritySuggestionResponse suggestion = prioritySuggestionService.suggestPriorityFromEmailImport(response);
+        response.setSuggestedPriority(suggestion.getPriority());
+        response.setPriorityExplanation(suggestion.getExplanation());
+        response.setPriority(suggestion.getPriority());
+        return response;
     }
 
     @Transactional
@@ -62,6 +69,9 @@ public class EmailImportService {
             }
             if (request.getSource() != null && !request.getSource().isBlank()) {
                 application.setSource(request.getSource());
+            }
+            if (request.getPriority() != null) {
+                application.setPriority(request.getPriority());
             }
 
             // Date mapping for existing application:
@@ -109,6 +119,7 @@ public class EmailImportService {
             application.setRecruiterEmail(request.getRecruiterEmail());
             application.setSource(request.getSource() != null && !request.getSource().isBlank() ? request.getSource() : "Email");
             application.setNotes(request.getSuggestedNotes());
+            application.setPriority(request.getPriority());
 
             // Date mapping for new application:
             // For new applications, use today as dateApplied unless the email clearly says "applied on"

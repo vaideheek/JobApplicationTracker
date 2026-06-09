@@ -1,5 +1,6 @@
 package com.jobtrack.dto;
 
+import com.jobtrack.enums.ApplicationPriority;
 import com.jobtrack.enums.ApplicationStatus;
 import lombok.*;
 
@@ -21,4 +22,7 @@ public class EmailParseResponse {
     private String suggestedNotes;
     private String confidenceScore; // "HIGH", "MEDIUM", "LOW"
     private boolean needsReview;
+    private ApplicationPriority suggestedPriority;
+    private String priorityExplanation;
+    private ApplicationPriority priority;
 }

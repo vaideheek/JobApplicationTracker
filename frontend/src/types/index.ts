@@ -122,5 +122,13 @@ export interface EmailParseResponse {
   suggestedNotes: string | null;
   confidenceScore: 'HIGH' | 'MEDIUM' | 'LOW';
   needsReview: boolean;
+  suggestedPriority?: ApplicationPriority;
+  priorityExplanation?: string;
+  priority?: ApplicationPriority;
+}
+
+export interface PrioritySuggestionResponse {
+  priority: ApplicationPriority;
+  explanation: string;
 }
 
