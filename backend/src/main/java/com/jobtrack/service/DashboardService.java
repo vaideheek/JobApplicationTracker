@@ -61,6 +61,8 @@ public class DashboardService {
         long followUpNeeded = jobApplicationRepository.countFollowUpNeeded(today);
         long upcomingInterviews = jobApplicationRepository.countUpcomingInterviews(today, fourteenDaysFromNow);
         long staleApps = jobApplicationRepository.countStaleApplications(fourteenDaysAgo);
+        long missingDocuments = jobApplicationRepository.countApplicationsMissingDocuments();
+
 
         // 2. Conversion Rates
         double responseRate = 0.0;
@@ -192,6 +194,7 @@ public class DashboardService {
                 .followUpNeededCount(followUpNeeded)
                 .upcomingInterviewsCount(upcomingInterviews)
                 .staleApplicationsCount(staleApps)
+                .missingDocumentsCount(missingDocuments)
                 .topCompanies(topCompanies)
                 .responseRate(responseRate)
                 .interviewConversionRate(interviewConversionRate)

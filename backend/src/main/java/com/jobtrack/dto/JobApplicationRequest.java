@@ -47,4 +47,17 @@ public class JobApplicationRequest {
     private LocalDate followUpDate;
 
     private LocalDate deadlineDate;
+
+    private String jobDescription;
+
+    private String jobDescriptionSummary;
+
+    private String originalJobUrl;
+
+    private Integer matchScore;
+
+    private String matchedSkills;
+
+    private String missingSkills;
+
 }

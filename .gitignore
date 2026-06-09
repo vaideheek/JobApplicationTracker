@@ -18,3 +18,9 @@ frontend/.vite/
 # Env
 .env
 *.log
+
+# Uploaded assets
+uploads/
+*.pdf
+*.docx
+

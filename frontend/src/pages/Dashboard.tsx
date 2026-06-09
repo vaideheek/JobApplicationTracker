@@ -13,7 +13,8 @@ import {
   TrendingUp,
   Award,
   CheckCircle2,
-  Bell
+  Bell,
+  FileWarning
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
@@ -99,7 +100,7 @@ export default function Dashboard() {
       </div>
 
       {/* Insights Stats Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           label="High Priority"
           value={insights?.highPriorityCount ?? 0}
@@ -123,6 +124,12 @@ export default function Dashboard() {
           value={insights?.staleApplicationsCount ?? 0}
           icon={Hourglass}
           color="bg-slate-100 text-slate-600"
+        />
+        <StatCard
+          label="Missing Documents"
+          value={insights?.missingDocumentsCount ?? 0}
+          icon={FileWarning}
+          color="bg-amber-100 text-amber-600"
         />
       </div>
 

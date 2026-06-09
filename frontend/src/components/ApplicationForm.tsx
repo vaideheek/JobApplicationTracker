@@ -25,6 +25,8 @@ const emptyForm: JobApplicationRequest = {
   priority: undefined,
   followUpDate: '',
   deadlineDate: '',
+  originalJobUrl: '',
+  jobDescription: '',
 };
 
 export default function ApplicationForm({
@@ -303,6 +305,36 @@ export default function ApplicationForm({
             placeholder="recruiter@company.com"
             className={inputClass}
           />
+        </div>
+      </div>
+
+      {/* Job Information */}
+      <div className="space-y-4 border-t border-slate-100 pt-6">
+        <h3 className="text-base font-semibold text-slate-800">Job Information</h3>
+        <div className="grid grid-cols-1 gap-6">
+          <div>
+            <label htmlFor="originalJobUrl" className={labelClass}>Job URL</label>
+            <input
+              id="originalJobUrl"
+              name="originalJobUrl"
+              value={form.originalJobUrl || ''}
+              onChange={handleChange}
+              placeholder="https://..."
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label htmlFor="jobDescription" className={labelClass}>Job Description</label>
+            <textarea
+              id="jobDescription"
+              name="jobDescription"
+              value={form.jobDescription || ''}
+              onChange={handleChange}
+              rows={8}
+              placeholder="Paste the job description here..."
+              className={`${inputClass} resize-y`}
+            />
+          </div>
         </div>
       </div>
 

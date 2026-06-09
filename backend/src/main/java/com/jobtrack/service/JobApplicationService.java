@@ -25,6 +25,8 @@ public class JobApplicationService {
 
     private final JobApplicationRepository jobApplicationRepository;
     private final StatusHistoryRepository statusHistoryRepository;
+    private final ApplicationDocumentService applicationDocumentService;
+
 
     @Transactional
     public JobApplicationResponse createApplication(JobApplicationRequest request) {
@@ -67,6 +69,12 @@ public class JobApplicationService {
         application.setPriority(request.getPriority());
         application.setFollowUpDate(request.getFollowUpDate());
         application.setDeadlineDate(request.getDeadlineDate());
+        application.setJobDescription(request.getJobDescription());
+        application.setJobDescriptionSummary(request.getJobDescriptionSummary());
+        application.setOriginalJobUrl(request.getOriginalJobUrl());
+        application.setMatchScore(request.getMatchScore());
+        application.setMatchedSkills(request.getMatchedSkills());
+        application.setMissingSkills(request.getMissingSkills());
 
         application = jobApplicationRepository.save(application);
 
@@ -90,8 +98,10 @@ public class JobApplicationService {
         if (!jobApplicationRepository.existsById(id)) {
             throw new ResourceNotFoundException("Job Application", id);
         }
+        applicationDocumentService.deleteApplicationDocuments(id);
         jobApplicationRepository.deleteById(id);
     }
+
 
     @Transactional(readOnly = true)
     public JobApplicationResponse getApplication(Long id) {
@@ -125,6 +135,12 @@ public class JobApplicationService {
                 .priority(request.getPriority())
                 .followUpDate(request.getFollowUpDate())
                 .deadlineDate(request.getDeadlineDate())
+                .jobDescription(request.getJobDescription())
+                .jobDescriptionSummary(request.getJobDescriptionSummary())
+                .originalJobUrl(request.getOriginalJobUrl())
+                .matchScore(request.getMatchScore())
+                .matchedSkills(request.getMatchedSkills())
+                .missingSkills(request.getMissingSkills())
                 .build();
     }
 
@@ -146,6 +162,12 @@ public class JobApplicationService {
                 .priority(entity.getPriority())
                 .followUpDate(entity.getFollowUpDate())
                 .deadlineDate(entity.getDeadlineDate())
+                .jobDescription(entity.getJobDescription())
+                .jobDescriptionSummary(entity.getJobDescriptionSummary())
+                .originalJobUrl(entity.getOriginalJobUrl())
+                .matchScore(entity.getMatchScore())
+                .matchedSkills(entity.getMatchedSkills())
+                .missingSkills(entity.getMissingSkills())
                 .createdAt(entity.getCreatedAt())
                 .lastUpdatedAt(entity.getLastUpdatedAt())
                 .build();

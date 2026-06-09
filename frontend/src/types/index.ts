@@ -26,6 +26,12 @@ export interface JobApplication {
   priority: ApplicationPriority | null;
   followUpDate: string | null;
   deadlineDate: string | null;
+  jobDescription: string | null;
+  jobDescriptionSummary: string | null;
+  originalJobUrl: string | null;
+  matchScore: number | null;
+  matchedSkills: string | null;
+  missingSkills: string | null;
   createdAt: string;
   lastUpdatedAt: string;
   statusHistory?: StatusHistoryEntry[];
@@ -47,6 +53,12 @@ export interface JobApplicationRequest {
   priority?: ApplicationPriority;
   followUpDate?: string;
   deadlineDate?: string;
+  jobDescription?: string;
+  jobDescriptionSummary?: string;
+  originalJobUrl?: string;
+  matchScore?: number;
+  matchedSkills?: string;
+  missingSkills?: string;
 }
 
 export interface StatusHistoryEntry {
@@ -137,6 +149,15 @@ export interface CompanyAppCount {
   count: number;
 }
 
+export interface ApplicationDocument {
+  id: number;
+  fileName: string;
+  fileType: string;
+  documentType: 'CV' | 'COVER_LETTER' | 'OTHER';
+  filePath: string;
+  uploadedAt: string;
+}
+
 export interface RecommendedAction {
   type: 'FOLLOW_UP' | 'INTERVIEW_PREP' | 'ASSESSMENT_COMPLETE' | 'REVIEW_STALE';
   applicationId: number;
@@ -151,10 +172,12 @@ export interface DashboardInsightsResponse {
   followUpNeededCount: number;
   upcomingInterviewsCount: number;
   staleApplicationsCount: number;
+  missingDocumentsCount: number;
   topCompanies: CompanyAppCount[];
   responseRate: number;
   interviewConversionRate: number;
   offerConversionRate: number;
   recommendedActions: RecommendedAction[];
 }
+
 

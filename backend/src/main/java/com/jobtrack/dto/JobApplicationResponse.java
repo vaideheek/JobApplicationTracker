@@ -31,7 +31,14 @@ public class JobApplicationResponse {
     private ApplicationPriority priority;
     private LocalDate followUpDate;
     private LocalDate deadlineDate;
+    private String jobDescription;
+    private String jobDescriptionSummary;
+    private String originalJobUrl;
+    private Integer matchScore;
+    private String matchedSkills;
+    private String missingSkills;
     private LocalDateTime createdAt;
     private LocalDateTime lastUpdatedAt;
     private List<StatusHistoryResponse> statusHistory;
+
 }

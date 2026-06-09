@@ -60,6 +60,22 @@ public class JobApplication {
 
     private LocalDate deadlineDate;
 
+    @Column(columnDefinition = "TEXT")
+    private String jobDescription;
+
+    @Column(columnDefinition = "TEXT")
+    private String jobDescriptionSummary;
+
+    private String originalJobUrl;
+
+    private Integer matchScore;
+
+    @Column(columnDefinition = "TEXT")
+    private String matchedSkills;
+
+    @Column(columnDefinition = "TEXT")
+    private String missingSkills;
+
     // --- Timestamps ---
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -72,6 +88,12 @@ public class JobApplication {
     @OrderBy("changedAt DESC")
     @Builder.Default
     private List<StatusHistory> statusHistory = new ArrayList<>();
+
+    @OneToMany(mappedBy = "jobApplication", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("uploadedAt DESC")
+    @Builder.Default
+    private List<ApplicationDocument> documents = new ArrayList<>();
+
 
     @PrePersist
     protected void onCreate() {

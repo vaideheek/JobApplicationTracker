@@ -14,6 +14,8 @@ public class DashboardInsightsResponse {
     private long followUpNeededCount;
     private long upcomingInterviewsCount;
     private long staleApplicationsCount;
+    private long missingDocumentsCount;
+
 
     private List<CompanyAppCount> topCompanies;
     private double responseRate;

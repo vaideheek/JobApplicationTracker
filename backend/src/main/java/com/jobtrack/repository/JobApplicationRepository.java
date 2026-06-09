@@ -41,9 +41,19 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
            "AND j.lastUpdatedAt <= :staleTime")
     long countStaleApplications(@Param("staleTime") LocalDateTime staleTime);
 
+    @Query("SELECT COUNT(j) FROM JobApplication j WHERE " +
+           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.OFFER) " +
+           "AND (" +
+           "  (SELECT COUNT(d) FROM ApplicationDocument d WHERE d.jobApplication = j AND d.documentType = com.jobtrack.enums.DocumentType.CV) = 0 " +
+           "  OR " +
+           "  (SELECT COUNT(d) FROM ApplicationDocument d WHERE d.jobApplication = j AND d.documentType = com.jobtrack.enums.DocumentType.COVER_LETTER) = 0" +
+           ")")
+    long countApplicationsMissingDocuments();
+
     @Query("SELECT j FROM JobApplication j WHERE " +
            "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.OFFER)")
     List<JobApplication> findActiveApplications();
+
 
     @Query("SELECT j.companyName, COUNT(j) FROM JobApplication j GROUP BY j.companyName ORDER BY COUNT(j) DESC")
     List<Object[]> findTopCompanies(Pageable pageable);

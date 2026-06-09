@@ -9,6 +9,7 @@ import type {
   EmailParseResponse,
   PrioritySuggestionResponse,
   DashboardInsightsResponse,
+  ApplicationDocument,
 } from '../types';
 
 const api = axios.create({
@@ -75,4 +76,35 @@ export const jobApplicationApi = {
     const { data } = await api.get('/dashboard/insights');
     return data;
   },
+
+  // Documents
+  getDocuments: async (applicationId: number): Promise<ApplicationDocument[]> => {
+    const { data } = await api.get(`/applications/${applicationId}/documents`);
+    return data;
+  },
+
+  uploadDocument: async (
+    applicationId: number,
+    file: File,
+    documentType: 'CV' | 'COVER_LETTER' | 'OTHER'
+  ): Promise<ApplicationDocument> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('documentType', documentType);
+    const { data } = await api.post(`/applications/${applicationId}/documents`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return data;
+  },
+
+  deleteDocument: async (applicationId: number, documentId: number): Promise<void> => {
+    await api.delete(`/applications/${applicationId}/documents/${documentId}`);
+  },
+
+  getDocumentDownloadUrl: (applicationId: number, documentId: number): string => {
+    return `/api/applications/${applicationId}/documents/${documentId}`;
+  },
 };
+
