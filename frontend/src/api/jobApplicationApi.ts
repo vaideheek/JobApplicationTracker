@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getApiBaseUrl } from './apiUrl';
 import type {
   JobApplication,
   JobApplicationRequest,
@@ -12,8 +13,8 @@ import type {
   ApplicationDocument,
 } from '../types';
 
-const api = axios.create({
-  baseURL: '/api',
+export const api = axios.create({
+  baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -103,8 +104,10 @@ export const jobApplicationApi = {
     await api.delete(`/applications/${applicationId}/documents/${documentId}`);
   },
 
-  getDocumentDownloadUrl: (applicationId: number, documentId: number): string => {
-    return `/api/applications/${applicationId}/documents/${documentId}`;
+  downloadDocument: async (applicationId: number, documentId: number): Promise<Blob> => {
+    const { data } = await api.get(`/applications/${applicationId}/documents/${documentId}`, {
+      responseType: 'blob',
+    });
+    return data;
   },
 };
-

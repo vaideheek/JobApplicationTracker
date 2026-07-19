@@ -187,14 +187,19 @@ To also delete the database data:
 docker compose down -v
 ```
 
+## Production Deployment
+
+For step-by-step instructions on deploying the application to production (Koyeb, Neon, Cloudflare Pages, Cloudflare R2), credentials rotation policies, and security configurations, please refer to [DEPLOYMENT.md](file:///Users/vaideheekore/Downloads/JobApplicationTrackerV/JobApplicationTracker/DEPLOYMENT.md).
+
 ## Future Roadmap
 
 - [ ] Gmail integration for automatic application tracking
 - [ ] AI-powered email parsing
-- [ ] User authentication (JWT)
-- [ ] Resume/document attachments
+- [x] User authentication (JWT)
+- [x] Resume/document attachments
 - [ ] Interview scheduling
 - [ ] Analytics and reporting
+
 
 ---
 

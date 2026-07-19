@@ -35,6 +35,7 @@ public class ApplicationDocument {
     @Column(nullable = false)
     private DocumentType documentType;
 
+    @JsonIgnore
     @Column(nullable = false)
     private String filePath;
 

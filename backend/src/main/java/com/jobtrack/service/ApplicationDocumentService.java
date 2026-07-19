@@ -1,108 +1,118 @@
 package com.jobtrack.service;
 
+import com.jobtrack.dto.ApplicationDocumentResponse;
 import com.jobtrack.entity.ApplicationDocument;
 import com.jobtrack.entity.JobApplication;
 import com.jobtrack.enums.DocumentType;
 import com.jobtrack.exception.ResourceNotFoundException;
 import com.jobtrack.repository.ApplicationDocumentRepository;
 import com.jobtrack.repository.JobApplicationRepository;
+import com.jobtrack.util.FileValidator;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.net.MalformedURLException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ApplicationDocumentService {
 
     private final ApplicationDocumentRepository documentRepository;
     private final JobApplicationRepository jobApplicationRepository;
-
-    @Value("${jobtrack.upload-dir}")
-    private String uploadDir;
+    private final DocumentStorageService storageService;
 
     @Transactional
-    public ApplicationDocument storeDocument(Long applicationId, MultipartFile file, DocumentType documentType) {
+    public ApplicationDocumentResponse storeDocument(Long applicationId, MultipartFile file, DocumentType documentType) {
         JobApplication application = jobApplicationRepository.findById(applicationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job Application", applicationId));
 
-        // 1. File Size Verification (Max 10 MB)
-        if (file.getSize() > 10 * 1024 * 1024) {
-            throw new IllegalArgumentException("File exceeds maximum size limit of 10MB");
+        // 1. Validate file (Size check, magic bytes check, zip bomb protection)
+        FileValidator.validateFile(file);
+
+        // 2. Safe Renaming & Sanitization
+        String sanitizedOriginal = FileValidator.sanitizeFilename(file.getOriginalFilename());
+        String storedFilename = documentType.name() + "_" + UUID.randomUUID().toString() + "_" + sanitizedOriginal;
+
+        // 3. Check for replacement and record the old document to delete later
+        Optional<ApplicationDocument> existing = Optional.empty();
+        if (documentType == DocumentType.CV || documentType == DocumentType.COVER_LETTER) {
+            existing = documentRepository.findByJobApplicationIdAndDocumentType(applicationId, documentType);
         }
 
-        // 2. File Format Verification (PDF, DOCX)
-        String originalFilename = file.getOriginalFilename();
-        if (originalFilename == null || originalFilename.isBlank()) {
-            throw new IllegalArgumentException("File must have a valid filename");
-        }
-
-        String lowercaseName = originalFilename.toLowerCase();
-        if (!lowercaseName.endsWith(".pdf") && !lowercaseName.endsWith(".docx")) {
-            throw new IllegalArgumentException("Unsupported file type. Only PDF and DOCX are allowed.");
-        }
-
-        // 3. Safe Renaming & Sanitization
-        String sanitizedOriginal = originalFilename.replaceAll("[^a-zA-Z0-9.-]", "_");
-        String storedFilename = documentType.name() + "_" + System.currentTimeMillis() + "_" + sanitizedOriginal;
-
+        String storageRef = null;
         try {
-            // Determine storage path: /uploads/application-{id}/
-            Path appDir = Paths.get(uploadDir).resolve("application-" + applicationId);
-            Files.createDirectories(appDir);
-            Path targetPath = appDir.resolve(storedFilename);
+            // Upload to storage first (Local or R2)
+            storageRef = storageService.store(applicationId, file, documentType, storedFilename);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to upload file to storage: " + sanitizedOriginal, e);
+        }
 
-            // 4. Overwrite/Replacement Logic for CV and COVER_LETTER
-            if (documentType == DocumentType.CV || documentType == DocumentType.COVER_LETTER) {
-                Optional<ApplicationDocument> existing = documentRepository
-                        .findByJobApplicationIdAndDocumentType(applicationId, documentType);
-                
-                if (existing.isPresent()) {
-                    ApplicationDocument oldDoc = existing.get();
-                    Files.deleteIfExists(Paths.get(oldDoc.getFilePath()));
-                    documentRepository.delete(oldDoc);
-                    documentRepository.flush();
-                }
+        ApplicationDocument doc = null;
+        try {
+            // If replacing, delete the old database record first
+            if (existing.isPresent()) {
+                ApplicationDocument oldDoc = existing.get();
+                documentRepository.delete(oldDoc);
+                documentRepository.flush();
             }
 
-            // Copy file content
-            Files.copy(file.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-
-            // 5. Database Save
-            ApplicationDocument doc = ApplicationDocument.builder()
+            // Save the new record
+            doc = ApplicationDocument.builder()
                     .jobApplication(application)
-                    .fileName(originalFilename)
+                    .fileName(sanitizedOriginal)
                     .fileType(file.getContentType())
                     .documentType(documentType)
-                    .filePath(targetPath.toString())
+                    .filePath(storageRef)
+                    .uploadedAt(LocalDateTime.now())
                     .build();
 
-            return documentRepository.save(doc);
+            doc = documentRepository.save(doc);
+            documentRepository.flush();
 
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to store file: " + originalFilename, e);
+        } catch (Exception e) {
+            // Rollback storage if database operation fails to avoid orphaned files
+            if (storageRef != null) {
+                try {
+                    storageService.delete(storageRef);
+                } catch (IOException ioException) {
+                    log.error("Failed to clean up uploaded file in storage after DB failure: " + storageRef, ioException);
+                }
+            }
+            throw new RuntimeException("Database error during document save: " + e.getMessage(), e);
         }
+
+        // Delete the old file from storage since new DB record is successfully saved
+        if (existing.isPresent()) {
+            ApplicationDocument oldDoc = existing.get();
+            try {
+                storageService.delete(oldDoc.getFilePath());
+            } catch (IOException e) {
+                log.error("Failed to delete replaced document from storage: " + oldDoc.getFilePath(), e);
+            }
+        }
+
+        return toResponse(doc);
     }
 
     @Transactional(readOnly = true)
-    public List<ApplicationDocument> getDocumentsByApplicationId(Long applicationId) {
+    public List<ApplicationDocumentResponse> getDocumentsByApplicationId(Long applicationId) {
         if (!jobApplicationRepository.existsById(applicationId)) {
             throw new ResourceNotFoundException("Job Application", applicationId);
         }
-        return documentRepository.findByJobApplicationIdOrderByUploadedAtDesc(applicationId);
+        return documentRepository.findByJobApplicationIdOrderByUploadedAtDesc(applicationId)
+                .stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -112,22 +122,16 @@ public class ApplicationDocumentService {
     }
 
     @Transactional(readOnly = true)
-    public Resource loadDocumentAsResource(Long applicationId, Long documentId) {
+    public InputStream loadDocumentAsStream(Long applicationId, Long documentId) {
         ApplicationDocument doc = getDocument(documentId);
         if (!doc.getJobApplication().getId().equals(applicationId)) {
             throw new IllegalArgumentException("Document does not belong to the specified application");
         }
 
         try {
-            Path filePath = Paths.get(doc.getFilePath());
-            Resource resource = new UrlResource(filePath.toUri());
-            if (resource.exists() && resource.isReadable()) {
-                return resource;
-            } else {
-                throw new RuntimeException("File not found or not readable: " + doc.getFileName());
-            }
-        } catch (MalformedURLException e) {
-            throw new RuntimeException("File path is malformed for document: " + doc.getFileName(), e);
+            return storageService.loadAsStream(doc.getFilePath());
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read file from storage for document: " + doc.getFileName(), e);
         }
     }
 
@@ -138,34 +142,43 @@ public class ApplicationDocumentService {
             throw new IllegalArgumentException("Document does not belong to the specified application");
         }
 
-        try {
-            Files.deleteIfExists(Paths.get(doc.getFilePath()));
-        } catch (IOException e) {
-            // Log warning but proceed with DB deletion
-            System.err.println("Could not delete file from disk: " + doc.getFilePath());
-        }
-
+        // Delete from database first, then flush
         documentRepository.delete(doc);
+        documentRepository.flush();
+
+        // Delete from storage
+        try {
+            storageService.delete(doc.getFilePath());
+        } catch (IOException e) {
+            log.error("Failed to delete document from storage during deletion of document id: " + documentId, e);
+        }
     }
 
     @Transactional
     public void deleteApplicationDocuments(Long applicationId) {
-        // Clean up disk files
         List<ApplicationDocument> docs = documentRepository.findByJobApplicationIdOrderByUploadedAtDesc(applicationId);
+        
+        // Delete records from database
+        documentRepository.deleteAll(docs);
+        documentRepository.flush();
+
+        // Clean up from storage
         for (ApplicationDocument doc : docs) {
             try {
-                Files.deleteIfExists(Paths.get(doc.getFilePath()));
+                storageService.delete(doc.getFilePath());
             } catch (IOException e) {
-                System.err.println("Failed to delete document file on application cascade deletion: " + doc.getFilePath());
+                log.error("Failed to delete document file from storage on application deletion: " + doc.getFilePath(), e);
             }
         }
+    }
 
-        // Delete the parent folder
-        try {
-            Path appDir = Paths.get(uploadDir).resolve("application-" + applicationId);
-            Files.deleteIfExists(appDir);
-        } catch (IOException e) {
-            System.err.println("Failed to delete application folder on cascade deletion: application-" + applicationId);
-        }
+    public ApplicationDocumentResponse toResponse(ApplicationDocument doc) {
+        return ApplicationDocumentResponse.builder()
+                .id(doc.getId())
+                .fileName(doc.getFileName())
+                .fileType(doc.getFileType())
+                .documentType(doc.getDocumentType())
+                .uploadedAt(doc.getUploadedAt())
+                .build();
     }
 }

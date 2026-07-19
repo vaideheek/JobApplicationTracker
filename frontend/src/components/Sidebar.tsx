@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, List, PlusCircle, Briefcase, Mail } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Briefcase, Mail, LogOut, User } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -9,6 +10,8 @@ const navItems = [
 ];
 
 export default function Sidebar() {
+  const { adminEmail, logout } = useAuth();
+
   return (
     <aside className="hidden w-64 flex-shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
       {/* Logo */}
@@ -40,9 +43,26 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="border-t border-slate-200 px-6 py-4">
-        <p className="text-xs text-slate-400">JobTrack Web v1.0</p>
+      {/* Footer / Account section */}
+      <div className="border-t border-slate-200 p-4 space-y-3 bg-slate-50/50">
+        {adminEmail && (
+          <div className="flex items-center gap-2.5 px-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-brand-700">
+              <User size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-slate-700 truncate">{adminEmail}</p>
+              <p className="text-[10px] text-slate-400">Administrator</p>
+            </div>
+          </div>
+        )}
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+        >
+          <LogOut size={18} />
+          <span>Log out</span>
+        </button>
       </div>
     </aside>
   );

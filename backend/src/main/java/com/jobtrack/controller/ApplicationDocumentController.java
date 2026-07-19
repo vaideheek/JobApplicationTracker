@@ -1,17 +1,17 @@
 package com.jobtrack.controller;
 
+import com.jobtrack.dto.ApplicationDocumentResponse;
 import com.jobtrack.entity.ApplicationDocument;
 import com.jobtrack.enums.DocumentType;
 import com.jobtrack.service.ApplicationDocumentService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.Resource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @RestController
@@ -22,37 +22,56 @@ public class ApplicationDocumentController {
     private final ApplicationDocumentService documentService;
 
     @PostMapping
-    public ResponseEntity<ApplicationDocument> uploadDocument(
+    public ResponseEntity<ApplicationDocumentResponse> uploadDocument(
             @PathVariable Long applicationId,
             @RequestParam("file") MultipartFile file,
             @RequestParam("documentType") DocumentType documentType) {
         
-        ApplicationDocument doc = documentService.storeDocument(applicationId, file, documentType);
-        return ResponseEntity.status(HttpStatus.CREATED).body(doc);
+        ApplicationDocumentResponse response = documentService.storeDocument(applicationId, file, documentType);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping
-    public ResponseEntity<List<ApplicationDocument>> getDocuments(@PathVariable Long applicationId) {
+    public ResponseEntity<List<ApplicationDocumentResponse>> getDocuments(@PathVariable Long applicationId) {
         return ResponseEntity.ok(documentService.getDocumentsByApplicationId(applicationId));
     }
 
     @GetMapping("/{documentId}")
-    public ResponseEntity<Resource> downloadDocument(
+    public ResponseEntity<StreamingResponseBody> downloadDocument(
             @PathVariable Long applicationId,
             @PathVariable Long documentId) {
         
-        Resource resource = documentService.loadDocumentAsResource(applicationId, documentId);
         ApplicationDocument doc = documentService.getDocument(documentId);
+        if (!doc.getJobApplication().getId().equals(applicationId)) {
+            throw new IllegalArgumentException("Document does not belong to the specified application");
+        }
+
+        InputStream inputStream = documentService.loadDocumentAsStream(applicationId, documentId);
 
         String contentType = doc.getFileType();
         if (contentType == null || contentType.isBlank()) {
-            contentType = "application/octet-stream";
+            contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
         }
+
+        StreamingResponseBody responseBody = outputStream -> {
+            try (InputStream is = inputStream) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = is.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+                outputStream.flush();
+            }
+        };
+
+        ContentDisposition contentDisposition = ContentDisposition.attachment()
+                .filename(doc.getFileName(), StandardCharsets.UTF_8)
+                .build();
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + doc.getFileName() + "\"")
-                .body(resource);
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition.toString())
+                .body(responseBody);
     }
 
     @DeleteMapping("/{documentId}")

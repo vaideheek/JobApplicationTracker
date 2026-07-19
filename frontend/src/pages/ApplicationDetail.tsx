@@ -87,9 +87,22 @@ export default function ApplicationDetail() {
     }
   };
 
-  const handleDownload = (docId: number) => {
-    const downloadUrl = jobApplicationApi.getDocumentDownloadUrl(Number(id), docId);
-    window.open(downloadUrl, '_blank');
+  const handleDownload = async (docId: number, fileName: string) => {
+    try {
+      const blob = await jobApplicationApi.downloadDocument(Number(id), docId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      if (link.parentNode) {
+        link.parentNode.removeChild(link);
+      }
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download document:', err);
+    }
   };
 
   if (loading) return <div className="flex h-64 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" /></div>;
@@ -110,7 +123,7 @@ export default function ApplicationDetail() {
             </div>
             <div className="flex gap-2 shrink-0">
               <button 
-                onClick={() => handleDownload(doc.id)}
+                onClick={() => handleDownload(doc.id, doc.fileName)}
                 className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                 title="Download"
               >
@@ -167,7 +180,7 @@ export default function ApplicationDetail() {
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button 
-                    onClick={() => handleDownload(doc.id)}
+                    onClick={() => handleDownload(doc.id, doc.fileName)}
                     className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                     title="Download"
                   >
