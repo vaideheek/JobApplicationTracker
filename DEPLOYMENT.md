@@ -1,6 +1,6 @@
 # JobTrack Production Deployment & Security Guide
 
-This document describes the production deployment, security configurations, credentials rotation policies, and operational characteristics of the JobTrack Web application.
+This document describes the production deployment, security configurations, and operational characteristics of the JobTrack Web application.
 
 ---
 
@@ -8,24 +8,24 @@ This document describes the production deployment, security configurations, cred
 
 The application is structured as a decoupled client-server monorepo:
 * **Frontend**: React (TypeScript/Vite) compiled to static files and hosted on **Cloudflare Pages**.
-* **Backend**: Spring Boot 3 Java 17 REST API packaged as a Docker image and hosted on **Koyeb**.
+* **Backend**: Spring Boot 3 Java 17 REST API packaged as a Docker image and hosted on **Render** (Docker Web Service).
 * **Database**: Serverless PostgreSQL hosted on **Neon** with TLS enabled (`sslmode=require`).
 * **Document Storage**: S3-compatible private cloud object storage hosted on **Cloudflare R2**.
 
 ```mermaid
 graph TD
     User([Browser Client]) -->|HTTPS / Static Assets| CF[Cloudflare Pages]
-    User -->|API Requests with Bearer JWT| KB[Koyeb Load Balancer]
-    KB -->|HTTP / Forwarded Headers| BE[Spring Boot Backend JVM]
+    User -->|API Requests with Cookies / CSRF| RD[Render Load Balancer]
+    RD -->|HTTP / Forwarded Headers| BE[Spring Boot Backend JVM]
     BE -->|SQL over TLS / sslmode=require| DB[(Neon Serverless PostgreSQL)]
-    BE -->|AWS S3 SDK v2 / Private Keys| R2[(Cloudflare R2 Private Bucket)]
+    BE -->|S3-compatible API / Private Keys| R2[(Cloudflare R2 Private Bucket)]
 ```
 
 ---
 
 ## 2. Production Environment Variables Reference
 
-### Backend Settings (Koyeb Environment)
+### Backend Settings (Render Environment)
 
 | Variable | Description | Example / Format |
 |---|---|---|
@@ -33,33 +33,53 @@ graph TD
 | `PORT` | HTTP Port matching container mapping | `8080` |
 | `SPRING_DATASOURCE_URL` | Neon Database connection URI with TLS | `jdbc:postgresql://<subdomain>.neon.tech/jobtrack_db?sslmode=require` |
 | `SPRING_DATASOURCE_USERNAME` | Database username credential | `neondb_owner` |
-| `SPRING_DATASOURCE_PASSWORD` | Database password credential | `abc123xyz...` |
-| `APP_CORS_ALLOWED_ORIGINS` | Comma-separated allowed frontend origins | `https://jobtrack.pages.dev` |
-| `APP_ADMIN_EMAIL` | Initial admin account username (for seeding) | `admin@yourdomain.com` |
-| `APP_ADMIN_PASSWORD` | Initial admin account password (for seeding) | `securePassword123` |
-| `APP_JWT_SECRET` | Strong, Base64-encoded secret of $\ge$ 256 bits | `dGVzdF9zZWNyZXRfZm9yX2xvY2FsX2RldmVsb3BtZW50X3Nob3VsZF9iZV9hdF9sZWFzdF8yNTZfYml0c19sb25n...` |
-| `APP_JWT_EXPIRATION_MINUTES` | Lifetime of issued authentication tokens | `480` |
+| `SPRING_DATASOURCE_PASSWORD` | Database password credential | `<password>` |
+| `APP_CORS_ALLOWED_ORIGINS` | Comma-separated allowed frontend origins | `https://jobapplicationtracker-129.pages.dev` |
+| `APP_ADMIN_EMAIL` | Initial admin account email (for seeding; APP_ADMIN_USERNAME is supported as an optional alias) | `admin@yourdomain.com` |
+| `APP_ADMIN_PASSWORD` | Initial admin account password (for seeding) | `<password>` |
+| `APP_DEMO_USERNAME` | Demo account username (optional, defaults to `demo`) | `demo` |
+| `APP_DEMO_PASSWORD` | Demo account password (optional, demo seeder runs in production only if provided) | `<password>` |
 | `APP_STORAGE_PROVIDER` | Swappable storage configuration | `r2` |
 | `R2_ENDPOINT` | Account S3 API URL (R2 Dashboard) | `https://<account-id>.r2.cloudflarestorage.com` |
-| `R2_ACCESS_KEY_ID` | Cloudflare API Token Access Key | `abc...` |
-| `R2_SECRET_ACCESS_KEY` | Cloudflare API Token Secret Key | `xyz...` |
+| `R2_ACCESS_KEY_ID` | Cloudflare API Token Access Key | `<access-key>` |
+| `R2_SECRET_ACCESS_KEY` | Cloudflare API Token Secret Key | `<secret-key>` |
 | `R2_BUCKET_NAME` | Private bucket identifier | `jobtrack-documents` |
 | `R2_REGION` | API request region override | `auto` |
+| `JAVA_TOOL_OPTIONS` | JVM optimization overrides for Render container | `-Xms64m -Xmx256m -XX:+UseSerialGC` |
 
 ### Frontend Settings (Cloudflare Pages Environment)
 
 | Variable | Description | Example / Format |
 |---|---|---|
-| `VITE_API_URL` | Backend origin for endpoints | `https://jobtrack-backend.koyeb.app` |
+| `VITE_API_URL` | Backend origin for endpoints | `https://jobtrack-api-eofg.onrender.com` |
 
 ---
 
-## 3. Deployment Configuration Details
+## 3. Session and CSRF Lifecycle Configuration
+
+The application uses **Spring Security Session-based authentication** (no JWTs) with strict cross-origin cookie rules and CSRF protection.
+
+### Production Session Cookies
+The production profile configuration enforces the following security attributes on session cookies (`JSESSIONID`):
+- `server.servlet.session.cookie.http-only=true`: Restricts access from JavaScript.
+- `server.servlet.session.cookie.secure=true`: Requires HTTPS context.
+- `server.servlet.session.cookie.same-site=None`: Allows cookie transport across different registrable domains (Pages to Render).
+- `server.forward-headers-strategy=framework`: Instructs Spring Boot to recognize forwarded HTTPS headers (`X-Forwarded-Proto`) sent by the Render load balancer.
+
+### CSRF Token Security
+The application implements standard Spring Security CSRF protection using `HttpSessionCsrfTokenRepository` to protect authenticated write requests (`POST`, `PUT`, `PATCH`, `DELETE`).
+- **Token Retrieval**: The client calls GET `/api/auth/csrf` (using `withCredentials: true`) to retrieve the session's token and header name (`X-CSRF-TOKEN`) in a JSON response.
+- **Login Rotation**: Upon successful login, Spring Security rotates the session to prevent session fixation attacks. The client fetches a new CSRF token associated with the new session.
+- **Header Injection**: The client Axios instance appends the token to the header for all state-changing requests.
+
+---
+
+## 4. Deployment Setup Details
 
 ### Neon (PostgreSQL Database)
-1. Provision a new PostgreSQL database.
-2. In the connection settings, select the database connection string and ensure it includes `sslmode=require` to enable mandatory TLS encryption.
-3. Flyway migrations (`V1` and `V2`) will run automatically on the first backend startup to construct tables.
+1. Provision a new PostgreSQL database on Neon.
+2. Under Connection Settings, copy the connection URI and ensure it includes `sslmode=require` to enforce TLS.
+3. Flyway migrations (`V1`, `V2`, `V3`) run automatically on startup to build tables and establish indices.
 
 ### Cloudflare R2 (Document Storage)
 1. Create a private bucket in the Cloudflare dashboard.
@@ -67,67 +87,32 @@ graph TD
 3. Generate S3-compatible API credentials with `Read/Write` permissions for the bucket.
 4. Pass these keys as `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` to the backend.
 
-### Koyeb (Spring Boot Docker Backend)
-1. Link your GitHub repository to Koyeb.
-2. Select **Docker Build** and set the path to `/backend` relative to the monorepo root.
-3. Configure Koyeb to build from the `Dockerfile` inside `/backend`.
-4. Map incoming traffic on port `80` to container port `8080`.
-5. Populate all Required Backend variables under the service's Environment settings.
-6. **Health check**: Use path `/actuator/health` on port `8080` for Koyeb load-balancer validation.
+### Render (Spring Boot Docker Backend)
+1. Set up a new **Web Service** on Render pointing to the GitHub repository.
+2. Select **Docker** as the environment and specify the build path.
+3. Set the environment variables in the Render Dashboard matching the Reference table.
+4. Add the `JAVA_TOOL_OPTIONS` value to optimize JVM memory limits.
+5. Render handles load balancing and automatically forwards HTTPS headers.
 
 ### Cloudflare Pages (Frontend Build)
-1. Link your GitHub repository to Cloudflare Pages.
-2. Configure settings:
+1. Create a new Pages Project linked to the GitHub repository.
+2. Configure build settings:
    - Framework preset: `Vite`
    - Build command: `npm run build`
    - Build output directory: `dist`
    - Root directory: `/frontend`
-3. Add the `VITE_API_URL` environment variable pointing to the Koyeb backend origin.
+3. Add the `VITE_API_URL` environment variable pointing to the Render backend origin.
 
 ---
 
-## 4. Key Rotation Policies
-
-### JWT Secret Rotation
-To cycle `APP_JWT_SECRET`:
-1. Generate a new cryptographically secure key of at least 32 bytes and encode it in Base64:
-   ```bash
-   openssl rand -base64 32
-   ```
-2. Update `APP_JWT_SECRET` in Koyeb's service configuration.
-3. Restart the Koyeb instance. Existing sessions will immediately expire, forcing users to sign in again.
-
-### Database Password Rotation
-1. Update the database password on Neon.
-2. Update `SPRING_DATASOURCE_PASSWORD` on Koyeb.
-3. Re-deploy/restart the Koyeb instance to establish new database connections.
-
-### R2 Storage Key Rotation
-1. Generate new API credentials in the Cloudflare console.
-2. Update `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` on Koyeb.
-3. Restart the Koyeb instance.
-4. Revoke the old credentials in the Cloudflare console.
-
----
-
-## 5. Operations, Cold Starts & Seeding Notes
-
-### Koyeb Cold Starts
-If using Koyeb's free tier, the instance will spin down after inactivity. The first API request will wake the container, which takes around 15–30 seconds. Actuator endpoints help keep the app responsive if pinged regularly.
+## 5. Operations & Seeding Notes
 
 ### Initial Administrator Seeding
-- On the first successful startup, the `AdminUserSeeder` checks the database. If the `app_users` table is completely empty, it seeds the default administrator account using the email and password supplied in `APP_ADMIN_EMAIL` and `APP_ADMIN_PASSWORD`.
-- **CRITICAL SECURITY NOTE**: Changing `APP_ADMIN_PASSWORD` in the environment variables after this initial startup will **NOT** modify or update the database password. This is to prevent environment configuration values from silently overriding active database credentials. To update the administrator password afterwards, execute a SQL update statement with a BCrypt hash directly on the database.
+- On first startup, `AdminUserSeeder` seeds the default administrator account using the credentials supplied in `APP_ADMIN_EMAIL` (or `APP_ADMIN_USERNAME` as fallback/alias) and `APP_ADMIN_PASSWORD`.
+- **Note**: Changing `APP_ADMIN_PASSWORD` in the environment variables after the initial run will **NOT** modify or update the database password. This prevents accidental credential resets.
 
----
-
-## 6. Troubleshooting
-
-1. **Backend fails to start with "IllegalStateException: Production startup failed: ..."**
-   - The validation component `ProductionVariableValidator` checks that all mandatory variables are supplied. Inspect the container logs in Koyeb to identify which variable is missing.
-
-2. **Documents fail to download or throw 401**
-   - Verify that the frontend Axios client is injecting the `Authorization: Bearer <token>` header. Verify that the R2 bucket access key has read permissions.
-
-3. **Flyway error: "Migration checksum mismatch"**
-   - This occurs if a migration file is modified after it has already run. Do not modify existing `V1` or `V2` files. Instead, create a new migration (`V3__...`) to apply changes.
+### Troubleshooting
+1. **Flyway error: "Migration checksum mismatch"**
+   - Do not modify existing `V1` or `V2` migration files. Always create a new migration (`V3__...`) to apply database changes.
+2. **Requests fail with 403 Forbidden**
+   - Ensure the browser accepts cross-site cookies. If cookies are blocked, the session context and CSRF token verification will fail.

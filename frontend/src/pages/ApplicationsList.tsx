@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus, Eye, Edit, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import SearchFilter from '../components/SearchFilter';
 import StatusBadge from '../components/StatusBadge';
 import DeleteModal from '../components/DeleteModal';
@@ -13,6 +14,8 @@ export default function ApplicationsList() {
   const [data, setData] = useState<PageResponse<JobApplication> | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<JobApplication | null>(null);
+  const { user } = useAuth();
+  const isDemo = user?.demoAccount || false;
 
   const search = searchParams.get('search') || '';
   const statusFilter = (searchParams.get('status') || '') as ApplicationStatus | '';
@@ -87,13 +90,15 @@ export default function ApplicationsList() {
             {data ? `${data.totalElements} total applications` : 'Loading...'}
           </p>
         </div>
-        <Link
-          to="/applications/new"
-          id="add-application-btn"
-          className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
-        >
-          <Plus size={18} /> Add Application
-        </Link>
+        {!isDemo && (
+          <Link
+            to="/applications/new"
+            id="add-application-btn"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+          >
+            <Plus size={18} /> Add Application
+          </Link>
+        )}
       </div>
 
       {/* Filters */}
@@ -175,20 +180,24 @@ export default function ApplicationsList() {
                           >
                             <Eye size={16} />
                           </Link>
-                          <Link
-                            to={`/applications/${app.id}/edit`}
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                            title="Edit"
-                          >
-                            <Edit size={16} />
-                          </Link>
-                          <button
-                            onClick={() => setDeleteTarget(app)}
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            title="Delete"
-                          >
-                            <Trash2 size={16} />
-                          </button>
+                          {!isDemo && (
+                            <>
+                              <Link
+                                to={`/applications/${app.id}/edit`}
+                                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                title="Edit"
+                              >
+                                <Edit size={16} />
+                              </Link>
+                              <button
+                                onClick={() => setDeleteTarget(app)}
+                                className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                title="Delete"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

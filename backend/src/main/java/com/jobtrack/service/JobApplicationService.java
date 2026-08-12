@@ -5,6 +5,7 @@ import com.jobtrack.dto.JobApplicationResponse;
 import com.jobtrack.dto.StatusHistoryResponse;
 import com.jobtrack.entity.JobApplication;
 import com.jobtrack.entity.StatusHistory;
+import com.jobtrack.entity.User;
 import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.exception.ResourceNotFoundException;
 import com.jobtrack.repository.JobApplicationRepository;
@@ -26,11 +27,14 @@ public class JobApplicationService {
     private final JobApplicationRepository jobApplicationRepository;
     private final StatusHistoryRepository statusHistoryRepository;
     private final ApplicationDocumentService applicationDocumentService;
-
+    private final CurrentUserService currentUserService;
 
     @Transactional
     public JobApplicationResponse createApplication(JobApplicationRequest request) {
-        JobApplication application = mapToEntity(request);
+        currentUserService.verifyNotDemo();
+        User user = currentUserService.getCurrentUser();
+
+        JobApplication application = mapToEntity(request, user);
         application = jobApplicationRepository.save(application);
 
         // Create initial status history entry
@@ -48,7 +52,10 @@ public class JobApplicationService {
 
     @Transactional
     public JobApplicationResponse updateApplication(Long id, JobApplicationRequest request) {
-        JobApplication application = jobApplicationRepository.findById(id)
+        currentUserService.verifyNotDemo();
+        User user = currentUserService.getCurrentUser();
+
+        JobApplication application = jobApplicationRepository.findByIdAndUserId(id, user.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Job Application", id));
 
         ApplicationStatus oldStatus = application.getStatus();
@@ -95,31 +102,38 @@ public class JobApplicationService {
 
     @Transactional
     public void deleteApplication(Long id) {
-        if (!jobApplicationRepository.existsById(id)) {
+        currentUserService.verifyNotDemo();
+        User user = currentUserService.getCurrentUser();
+
+        if (!jobApplicationRepository.existsByIdAndUserId(id, user.getId())) {
             throw new ResourceNotFoundException("Job Application", id);
         }
+
+        // Documents ownership check is done internally in deleteApplicationDocuments
         applicationDocumentService.deleteApplicationDocuments(id);
         jobApplicationRepository.deleteById(id);
     }
 
-
     @Transactional(readOnly = true)
     public JobApplicationResponse getApplication(Long id) {
-        JobApplication application = jobApplicationRepository.findById(id)
+        User user = currentUserService.getCurrentUser();
+        JobApplication application = jobApplicationRepository.findByIdAndUserId(id, user.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Job Application", id));
         return mapToResponseWithHistory(application);
     }
 
     @Transactional(readOnly = true)
     public Page<JobApplicationResponse> getAllApplications(String search, ApplicationStatus status, Pageable pageable) {
-        return jobApplicationRepository.findWithFilters(search, status, pageable)
+        User user = currentUserService.getCurrentUser();
+        return jobApplicationRepository.findWithFilters(search, status, user.getId(), pageable)
                 .map(this::mapToResponse);
     }
 
     // --- Mapping helpers ---
 
-    private JobApplication mapToEntity(JobApplicationRequest request) {
+    private JobApplication mapToEntity(JobApplicationRequest request, User user) {
         return JobApplication.builder()
+                .user(user)
                 .companyName(request.getCompanyName())
                 .jobTitle(request.getJobTitle())
                 .location(request.getLocation())

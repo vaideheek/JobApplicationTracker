@@ -10,6 +10,10 @@ import java.util.Optional;
 
 @Repository
 public interface ApplicationDocumentRepository extends JpaRepository<ApplicationDocument, Long> {
-    List<ApplicationDocument> findByJobApplicationIdOrderByUploadedAtDesc(Long applicationId);
-    Optional<ApplicationDocument> findByJobApplicationIdAndDocumentType(Long applicationId, DocumentType documentType);
+
+    List<ApplicationDocument> findByJobApplicationIdAndJobApplicationUserIdOrderByUploadedAtDesc(Long applicationId, Long userId);
+
+    Optional<ApplicationDocument> findByIdAndJobApplicationUserId(Long id, Long userId);
+
+    Optional<ApplicationDocument> findByJobApplicationIdAndDocumentTypeAndJobApplicationUserId(Long applicationId, DocumentType documentType, Long userId);
 }

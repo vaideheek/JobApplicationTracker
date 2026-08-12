@@ -10,7 +10,7 @@ const navItems = [
 ];
 
 export default function Sidebar() {
-  const { adminEmail, logout } = useAuth();
+  const { user, logout } = useAuth();
 
   return (
     <aside className="hidden w-64 flex-shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
@@ -45,14 +45,18 @@ export default function Sidebar() {
 
       {/* Footer / Account section */}
       <div className="border-t border-slate-200 p-4 space-y-3 bg-slate-50/50">
-        {adminEmail && (
+        {user && (
           <div className="flex items-center gap-2.5 px-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-100 text-brand-700">
               <User size={16} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-slate-700 truncate">{adminEmail}</p>
-              <p className="text-[10px] text-slate-400">Administrator</p>
+              <p className="text-xs font-semibold text-slate-700 truncate">
+                {user.displayName || user.username}
+              </p>
+              <p className="text-[10px] text-slate-400">
+                {user.demoAccount ? 'Demo Account' : 'Administrator'}
+              </p>
             </div>
           </div>
         )}

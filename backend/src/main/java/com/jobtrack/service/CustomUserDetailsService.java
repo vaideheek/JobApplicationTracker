@@ -1,10 +1,9 @@
 package com.jobtrack.service;
 
-import com.jobtrack.entity.AppUser;
-import com.jobtrack.repository.AppUserRepository;
+import com.jobtrack.entity.User;
+import com.jobtrack.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -14,23 +13,20 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
-public class AppUserDetailsService implements UserDetailsService {
+public class CustomUserDetailsService implements UserDetailsService {
 
-    private final AppUserRepository userRepository;
+    private final UserRepository userRepository;
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        AppUser user = userRepository.findByEmailIgnoreCase(username)
+        User user = userRepository.findByUsernameIgnoreCase(username)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
 
-        return new User(
-                user.getEmail(),
-                user.getPasswordHash(),
-                user.isEnabled(),
-                true,
-                true,
-                true,
-                List.of(new SimpleGrantedAuthority(user.getRole()))
-        );
+        return org.springframework.security.core.userdetails.User.builder()
+                .username(user.getUsername())
+                .password(user.getPasswordHash())
+                .disabled(!user.isEnabled())
+                .authorities(List.of(new SimpleGrantedAuthority(user.getRole())))
+                .build();
     }
 }

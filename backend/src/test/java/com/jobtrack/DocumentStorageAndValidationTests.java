@@ -2,11 +2,12 @@ package com.jobtrack;
 
 import com.jobtrack.entity.ApplicationDocument;
 import com.jobtrack.entity.JobApplication;
+import com.jobtrack.entity.User;
 import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.enums.DocumentType;
 import com.jobtrack.repository.ApplicationDocumentRepository;
 import com.jobtrack.repository.JobApplicationRepository;
-import com.jobtrack.service.JwtService;
+import com.jobtrack.repository.UserRepository;
 import com.jobtrack.service.R2StorageService;
 import com.jobtrack.util.FileValidator;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,9 +16,10 @@ import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.multipart.MultipartFile;
@@ -29,6 +31,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -47,22 +50,40 @@ public class DocumentStorageAndValidationTests {
     private MockMvc mockMvc;
 
     @Autowired
-    private JwtService jwtService;
-
-    @Autowired
     private JobApplicationRepository applicationRepository;
 
     @Autowired
     private ApplicationDocumentRepository documentRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     private JobApplication testApp;
+    private User testUser;
 
     @BeforeEach
     void setUp() {
         documentRepository.deleteAll();
         applicationRepository.deleteAll();
+        userRepository.deleteAll();
+
+        // Seed test user "owner"
+        testUser = User.builder()
+                .username("owner")
+                .passwordHash(passwordEncoder.encode("password123"))
+                .displayName("Owner User")
+                .role("ROLE_USER")
+                .enabled(true)
+                .demoAccount(false)
+                .createdAt(LocalDateTime.now())
+                .build();
+        testUser = userRepository.save(testUser);
 
         JobApplication app = JobApplication.builder()
+                .user(testUser)
                 .companyName("Test Corp")
                 .jobTitle("Engineer")
                 .status(ApplicationStatus.APPLIED)
@@ -140,6 +161,7 @@ public class DocumentStorageAndValidationTests {
     }
 
     @Test
+    @WithMockUser(username = "owner")
     void testDocumentResponseDtoDoesNotExposeFilePath() throws Exception {
         ApplicationDocument doc = ApplicationDocument.builder()
                 .jobApplication(testApp)
@@ -150,10 +172,7 @@ public class DocumentStorageAndValidationTests {
                 .build();
         documentRepository.save(doc);
 
-        String token = jwtService.generateToken("admin@test.com");
-
-        mockMvc.perform(get("/api/applications/" + testApp.getId() + "/documents")
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+        mockMvc.perform(get("/api/applications/" + testApp.getId() + "/documents"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].fileName").value("test.pdf"))
                 .andExpect(jsonPath("$[0].filePath").doesNotExist())

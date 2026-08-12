@@ -1,5 +1,4 @@
-import axios from 'axios';
-import { getApiBaseUrl } from './apiUrl';
+import { api } from './apiClient';
 import type {
   JobApplication,
   JobApplicationRequest,
@@ -12,13 +11,6 @@ import type {
   DashboardInsightsResponse,
   ApplicationDocument,
 } from '../types';
-
-export const api = axios.create({
-  baseURL: getApiBaseUrl(),
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
 
 export const jobApplicationApi = {
   // Dashboard
@@ -92,11 +84,7 @@ export const jobApplicationApi = {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('documentType', documentType);
-    const { data } = await api.post(`/applications/${applicationId}/documents`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    const { data } = await api.post(`/applications/${applicationId}/documents`, formData);
     return data;
   },
 

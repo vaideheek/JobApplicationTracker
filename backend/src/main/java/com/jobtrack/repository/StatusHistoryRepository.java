@@ -14,6 +14,6 @@ public interface StatusHistoryRepository extends JpaRepository<StatusHistory, Lo
 
     List<StatusHistory> findByJobApplicationIdOrderByChangedAtDesc(Long jobApplicationId);
 
-    @Query("SELECT COUNT(DISTINCT s.jobApplication.id) FROM StatusHistory s WHERE s.toStatus = :status")
-    long countDistinctApplicationsByToStatus(@Param("status") ApplicationStatus status);
+    @Query("SELECT COUNT(DISTINCT s.jobApplication.id) FROM StatusHistory s WHERE s.jobApplication.user.id = :userId AND s.toStatus = :status")
+    long countDistinctApplicationsByToStatusAndUserId(@Param("status") ApplicationStatus status, @Param("userId") Long userId);
 }

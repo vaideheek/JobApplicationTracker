@@ -17,10 +17,22 @@ frontend/.vite/
 
 # Env
 .env
+.env.*
+!.env.example
 *.log
+
+# Seeding Exclusions
+seed/my_applications.json
+seed/private/
 
 # Uploaded assets
 uploads/
 *.pdf
 *.docx
+
+# TS Build Info
+frontend/tsconfig.tsbuildinfo
+
+# Local Database Dumps
+jobtrack-before-auth.sql
 
