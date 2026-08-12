@@ -3,6 +3,7 @@ package com.jobtrack.service;
 import com.jobtrack.dto.ApplicationDocumentResponse;
 import com.jobtrack.entity.ApplicationDocument;
 import com.jobtrack.entity.JobApplication;
+import com.jobtrack.entity.User;
 import com.jobtrack.enums.DocumentType;
 import com.jobtrack.exception.ResourceNotFoundException;
 import com.jobtrack.repository.ApplicationDocumentRepository;
@@ -30,10 +31,14 @@ public class ApplicationDocumentService {
     private final ApplicationDocumentRepository documentRepository;
     private final JobApplicationRepository jobApplicationRepository;
     private final DocumentStorageService storageService;
+    private final CurrentUserService currentUserService;
 
     @Transactional
     public ApplicationDocumentResponse storeDocument(Long applicationId, MultipartFile file, DocumentType documentType) {
-        JobApplication application = jobApplicationRepository.findById(applicationId)
+        currentUserService.verifyNotDemo();
+        User user = currentUserService.getCurrentUser();
+
+        JobApplication application = jobApplicationRepository.findByIdAndUserId(applicationId, user.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Job Application", applicationId));
 
         // 1. Validate file (Size check, magic bytes check, zip bomb protection)
@@ -46,7 +51,7 @@ public class ApplicationDocumentService {
         // 3. Check for replacement and record the old document to delete later
         Optional<ApplicationDocument> existing = Optional.empty();
         if (documentType == DocumentType.CV || documentType == DocumentType.COVER_LETTER) {
-            existing = documentRepository.findByJobApplicationIdAndDocumentType(applicationId, documentType);
+            existing = documentRepository.findByJobApplicationIdAndDocumentTypeAndJobApplicationUserId(applicationId, documentType, user.getId());
         }
 
         String storageRef = null;
@@ -106,10 +111,13 @@ public class ApplicationDocumentService {
 
     @Transactional(readOnly = true)
     public List<ApplicationDocumentResponse> getDocumentsByApplicationId(Long applicationId) {
-        if (!jobApplicationRepository.existsById(applicationId)) {
+        User user = currentUserService.getCurrentUser();
+
+        if (!jobApplicationRepository.existsByIdAndUserId(applicationId, user.getId())) {
             throw new ResourceNotFoundException("Job Application", applicationId);
         }
-        return documentRepository.findByJobApplicationIdOrderByUploadedAtDesc(applicationId)
+
+        return documentRepository.findByJobApplicationIdAndJobApplicationUserIdOrderByUploadedAtDesc(applicationId, user.getId())
                 .stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
@@ -117,12 +125,14 @@ public class ApplicationDocumentService {
 
     @Transactional(readOnly = true)
     public ApplicationDocument getDocument(Long documentId) {
-        return documentRepository.findById(documentId)
+        User user = currentUserService.getCurrentUser();
+        return documentRepository.findByIdAndJobApplicationUserId(documentId, user.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Document", documentId));
     }
 
     @Transactional(readOnly = true)
     public InputStream loadDocumentAsStream(Long applicationId, Long documentId) {
+        // getDocument already validates that document belongs to currently logged-in user
         ApplicationDocument doc = getDocument(documentId);
         if (!doc.getJobApplication().getId().equals(applicationId)) {
             throw new IllegalArgumentException("Document does not belong to the specified application");
@@ -137,6 +147,9 @@ public class ApplicationDocumentService {
 
     @Transactional
     public void deleteDocument(Long applicationId, Long documentId) {
+        currentUserService.verifyNotDemo();
+
+        // getDocument already validates that document belongs to currently logged-in user
         ApplicationDocument doc = getDocument(documentId);
         if (!doc.getJobApplication().getId().equals(applicationId)) {
             throw new IllegalArgumentException("Document does not belong to the specified application");
@@ -156,8 +169,11 @@ public class ApplicationDocumentService {
 
     @Transactional
     public void deleteApplicationDocuments(Long applicationId) {
-        List<ApplicationDocument> docs = documentRepository.findByJobApplicationIdOrderByUploadedAtDesc(applicationId);
-        
+        currentUserService.verifyNotDemo();
+        User user = currentUserService.getCurrentUser();
+
+        List<ApplicationDocument> docs = documentRepository.findByJobApplicationIdAndJobApplicationUserIdOrderByUploadedAtDesc(applicationId, user.getId());
+
         // Delete records from database
         documentRepository.deleteAll(docs);
         documentRepository.flush();

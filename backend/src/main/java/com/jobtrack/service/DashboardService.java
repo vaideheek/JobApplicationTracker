@@ -5,6 +5,7 @@ import com.jobtrack.dto.DashboardStats;
 import com.jobtrack.enums.ApplicationPriority;
 import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.entity.JobApplication;
+import com.jobtrack.entity.User;
 import com.jobtrack.repository.JobApplicationRepository;
 import com.jobtrack.repository.StatusHistoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,17 +28,21 @@ public class DashboardService {
 
     private final JobApplicationRepository jobApplicationRepository;
     private final StatusHistoryRepository statusHistoryRepository;
+    private final CurrentUserService currentUserService;
 
     @Transactional(readOnly = true)
     public DashboardStats getStats() {
-        long total = jobApplicationRepository.count();
-        long interviews = jobApplicationRepository.countByStatus(ApplicationStatus.INTERVIEW);
-        long offers = jobApplicationRepository.countByStatus(ApplicationStatus.OFFER);
-        long rejections = jobApplicationRepository.countByStatus(ApplicationStatus.REJECTED);
+        User user = currentUserService.getCurrentUser();
+        Long userId = user.getId();
+
+        long total = jobApplicationRepository.countByUserId(userId);
+        long interviews = jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.INTERVIEW, userId);
+        long offers = jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.OFFER, userId);
+        long rejections = jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.REJECTED, userId);
 
         // Calculate start of current week (Monday)
         LocalDate startOfWeek = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        long thisWeek = jobApplicationRepository.countByDateAppliedAfter(startOfWeek.minusDays(1));
+        long thisWeek = jobApplicationRepository.countByDateAppliedAfterAndUserId(startOfWeek.minusDays(1), userId);
 
         return DashboardStats.builder()
                 .totalApplications(total)
@@ -50,19 +55,21 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public DashboardInsightsResponse getInsights() {
+        User user = currentUserService.getCurrentUser();
+        Long userId = user.getId();
+
         LocalDate today = LocalDate.now();
         LocalDateTime fourteenDaysAgo = LocalDateTime.now().minusDays(14);
         LocalDate fourteenDaysFromNow = today.plusDays(14);
 
-        long total = jobApplicationRepository.count();
+        long total = jobApplicationRepository.countByUserId(userId);
 
         // 1. New Dashboard Cards Counts
-        long highPriority = jobApplicationRepository.countByPriority(ApplicationPriority.HIGH);
-        long followUpNeeded = jobApplicationRepository.countFollowUpNeeded(today);
-        long upcomingInterviews = jobApplicationRepository.countUpcomingInterviews(today, fourteenDaysFromNow);
-        long staleApps = jobApplicationRepository.countStaleApplications(fourteenDaysAgo);
-        long missingDocuments = jobApplicationRepository.countApplicationsMissingDocuments();
-
+        long highPriority = jobApplicationRepository.countByPriorityAndUserId(ApplicationPriority.HIGH, userId);
+        long followUpNeeded = jobApplicationRepository.countFollowUpNeeded(today, userId);
+        long upcomingInterviews = jobApplicationRepository.countUpcomingInterviews(today, fourteenDaysFromNow, userId);
+        long staleApps = jobApplicationRepository.countStaleApplications(fourteenDaysAgo, userId);
+        long missingDocuments = jobApplicationRepository.countApplicationsMissingDocuments(userId);
 
         // 2. Conversion Rates
         double responseRate = 0.0;
@@ -71,25 +78,25 @@ public class DashboardService {
 
         if (total > 0) {
             // Response Rate = applications with status ASSESSMENT, INTERVIEW, OFFER, or REJECTED / total
-            long responseCount = jobApplicationRepository.countByStatus(ApplicationStatus.ASSESSMENT)
-                    + jobApplicationRepository.countByStatus(ApplicationStatus.INTERVIEW)
-                    + jobApplicationRepository.countByStatus(ApplicationStatus.OFFER)
-                    + jobApplicationRepository.countByStatus(ApplicationStatus.REJECTED);
+            long responseCount = jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.ASSESSMENT, userId)
+                    + jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.INTERVIEW, userId)
+                    + jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.OFFER, userId)
+                    + jobApplicationRepository.countByStatusAndUserId(ApplicationStatus.REJECTED, userId);
             responseRate = ((double) responseCount / total) * 100.0;
 
             // Interview Conversion Rate = unique apps that reached INTERVIEW / total
-            long reachedInterview = statusHistoryRepository.countDistinctApplicationsByToStatus(ApplicationStatus.INTERVIEW);
+            long reachedInterview = statusHistoryRepository.countDistinctApplicationsByToStatusAndUserId(ApplicationStatus.INTERVIEW, userId);
             reachedInterview = Math.min(reachedInterview, total);
             interviewConversionRate = ((double) reachedInterview / total) * 100.0;
 
             // Offer Conversion Rate = unique apps that reached OFFER / total
-            long reachedOffer = statusHistoryRepository.countDistinctApplicationsByToStatus(ApplicationStatus.OFFER);
+            long reachedOffer = statusHistoryRepository.countDistinctApplicationsByToStatusAndUserId(ApplicationStatus.OFFER, userId);
             reachedOffer = Math.min(reachedOffer, total);
             offerConversionRate = ((double) reachedOffer / total) * 100.0;
         }
 
         // 3. Top Companies
-        List<Object[]> topCompaniesRaw = jobApplicationRepository.findTopCompanies(PageRequest.of(0, 5));
+        List<Object[]> topCompaniesRaw = jobApplicationRepository.findTopCompanies(userId, PageRequest.of(0, 5));
         List<DashboardInsightsResponse.CompanyAppCount> topCompanies = topCompaniesRaw.stream()
                 .map(row -> DashboardInsightsResponse.CompanyAppCount.builder()
                         .companyName((String) row[0])
@@ -98,7 +105,7 @@ public class DashboardService {
                 .collect(Collectors.toList());
 
         // 4. Recommended Actions
-        List<JobApplication> activeApps = jobApplicationRepository.findActiveApplications();
+        List<JobApplication> activeApps = jobApplicationRepository.findActiveApplications(userId);
         List<DashboardInsightsResponse.RecommendedAction> allActions = new ArrayList<>();
 
         for (JobApplication app : activeApps) {

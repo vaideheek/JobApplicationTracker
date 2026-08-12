@@ -1,51 +1,50 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api } from '../api/jobApplicationApi';
+import { authApi, type AuthUser } from '../api/authApi';
+import { api, csrfManager } from '../api/apiClient';
 
 interface AuthContextType {
-  isAuthenticated: boolean;
-  token: string | null;
-  adminEmail: string | null;
-  login: (token: string, email: string, role: string) => void;
-  logout: () => void;
+  user: AuthUser | null;
   loading: boolean;
+  login: (username: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [token, setToken] = useState<string | null>(sessionStorage.getItem('access_token'));
-  const [adminEmail, setAdminEmail] = useState<string | null>(sessionStorage.getItem('admin_email'));
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Set up request interceptor to inject JWT token
+  // Validate the session on mount
   useEffect(() => {
-    const requestInterceptor = api.interceptors.request.use(
-      (config) => {
-        const storedToken = sessionStorage.getItem('access_token');
-        if (storedToken && config.headers) {
-          config.headers.Authorization = `Bearer ${storedToken}`;
-        }
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
-
-    return () => {
-      api.interceptors.request.eject(requestInterceptor);
+    const initAuth = async () => {
+      try {
+        // Retrieve initial CSRF token (sets up session context)
+        await csrfManager.fetchToken();
+        const currentUser = await authApi.me();
+        setUser(currentUser);
+      } catch (err) {
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
     };
+    initAuth();
   }, []);
 
-  // Set up response interceptor to catch 401s
+  // Response interceptor to catch 401s
   useEffect(() => {
     const responseInterceptor = api.interceptors.response.use(
       (response) => response,
       (error) => {
         if (error.response && error.response.status === 401) {
-          sessionStorage.removeItem('access_token');
-          sessionStorage.removeItem('admin_email');
-          setToken(null);
-          setAdminEmail(null);
-          if (window.location.pathname !== '/login') {
+          const configUrl = error.config?.url || '';
+          const isAuthEndpoint = configUrl.includes('/auth/me') || configUrl.includes('/auth/login') || configUrl.includes('/auth/logout');
+
+          setUser(null);
+          csrfManager.clearToken();
+
+          if (!isAuthEndpoint && window.location.pathname !== '/login') {
             window.location.href = '/login?expired=true';
           }
         }
@@ -58,49 +57,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Validate the token against the backend on mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      if (token) {
-        try {
-          const { data } = await api.get('/auth/me');
-          setAdminEmail(data.email);
-        } catch (e) {
-          // If fetch fails, the response interceptor handles the 401 reset
-          setToken(null);
-          setAdminEmail(null);
-        }
-      }
-      setLoading(false);
-    };
-
-    checkAuth();
-  }, [token]);
-
-  const login = (jwt: string, email: string, role: string) => {
-    sessionStorage.setItem('access_token', jwt);
-    sessionStorage.setItem('admin_email', email);
-    setToken(jwt);
-    setAdminEmail(email);
+  const login = async (username: string, password: string) => {
+    // 1. Fetch pre-login CSRF token
+    await csrfManager.fetchToken();
+    // 2. Perform authentication call (CSRF header will be automatically injected)
+    const loggedInUser = await authApi.login(username, password);
+    setUser(loggedInUser);
+    // 3. Fetch/refresh post-login rotated CSRF token
+    await csrfManager.fetchToken();
   };
 
-  const logout = () => {
-    sessionStorage.removeItem('access_token');
-    sessionStorage.removeItem('admin_email');
-    setToken(null);
-    setAdminEmail(null);
-    window.location.href = '/login';
+  const logout = async () => {
+    try {
+      await authApi.logout();
+    } catch (e) {
+      console.error('Logout call failed', e);
+    } finally {
+      setUser(null);
+      csrfManager.clearToken();
+      window.location.href = '/login';
+    }
   };
 
   return (
     <AuthContext.Provider
       value={{
-        isAuthenticated: !!token,
-        token,
-        adminEmail,
+        user,
+        loading,
         login,
         logout,
-        loading,
       }}
     >
       {children}

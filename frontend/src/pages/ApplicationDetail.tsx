@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { 
-  ArrowLeft, 
-  Edit, 
-  Trash2, 
-  ExternalLink, 
-  Mail, 
-  MapPin, 
-  Calendar, 
-  Clock, 
-  DollarSign, 
+import { useAuth } from '../context/AuthContext';
+import {
+  ArrowLeft,
+  Edit,
+  Trash2,
+  ExternalLink,
+  Mail,
+  MapPin,
+  Calendar,
+  Clock,
+  DollarSign,
   Flag,
   Upload,
   Download,
   Trash,
   FileText,
-  FileWarning
+  FileWarning,
+  AlertCircle
 } from 'lucide-react';
 import StatusBadge from '../components/StatusBadge';
 import Timeline from '../components/Timeline';
@@ -27,10 +29,12 @@ import type { JobApplication, ApplicationDocument } from '../types';
 export default function ApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isDemo = user?.demoAccount || false;
   const [app, setApp] = useState<JobApplication | null>(null);
   const [loading, setLoading] = useState(true);
   const [showDelete, setShowDelete] = useState(false);
-  
+
   // Tab and document states
   const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'timeline'>('overview');
   const [docs, setDocs] = useState<ApplicationDocument[]>([]);
@@ -122,36 +126,42 @@ export default function ApplicationDetail() {
               <span className="text-sm font-medium text-slate-700 truncate">{doc.fileName}</span>
             </div>
             <div className="flex gap-2 shrink-0">
-              <button 
+              <button
                 onClick={() => handleDownload(doc.id, doc.fileName)}
                 className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                 title="Download"
               >
                 <Download size={16} />
               </button>
-              <button 
-                onClick={() => handleDeleteDoc(doc.id)}
-                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors"
-                title="Delete"
-              >
-                <Trash size={16} />
-              </button>
+              {!isDemo && (
+                <button
+                  onClick={() => handleDeleteDoc(doc.id)}
+                  className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors"
+                  title="Delete"
+                >
+                  <Trash size={16} />
+                </button>
+              )}
             </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-lg p-6 hover:border-brand-500 transition-colors">
             <Upload className="h-6 w-6 text-slate-400 mb-2" />
             <span className="text-xs text-slate-500 font-medium mb-3">Upload PDF or DOCX (Max 10MB)</span>
-            <label className="cursor-pointer inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
-              Choose File
-              <input 
-                type="file" 
-                accept=".pdf,.docx" 
-                onChange={(e) => handleUpload(e, type)} 
-                className="hidden" 
-                disabled={uploading}
-              />
-            </label>
+            {isDemo ? (
+              <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-2.5 py-1 rounded">Upload disabled in demo</span>
+            ) : (
+              <label className="cursor-pointer inline-flex items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 transition-colors">
+                Choose File
+                <input
+                  type="file"
+                  accept=".pdf,.docx"
+                  onChange={(e) => handleUpload(e, type)}
+                  className="hidden"
+                  disabled={uploading}
+                />
+              </label>
+            )}
           </div>
         )}
       </div>
@@ -166,7 +176,7 @@ export default function ApplicationDetail() {
           <h3 className="font-semibold text-slate-800 text-sm">Other Documents</h3>
           <span className="text-xs text-slate-400">{otherDocs.length} file(s)</span>
         </div>
-        
+
         {otherDocs.length > 0 && (
           <div className="space-y-2 max-h-[200px] overflow-y-auto pr-1">
             {otherDocs.map((doc) => (
@@ -179,20 +189,22 @@ export default function ApplicationDetail() {
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  <button 
+                  <button
                     onClick={() => handleDownload(doc.id, doc.fileName)}
                     className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
                     title="Download"
                   >
                     <Download size={16} />
                   </button>
-                  <button 
-                    onClick={() => handleDeleteDoc(doc.id)}
-                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors"
-                    title="Delete"
-                  >
-                    <Trash size={16} />
-                  </button>
+                  {!isDemo && (
+                    <button
+                      onClick={() => handleDeleteDoc(doc.id)}
+                      className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors"
+                      title="Delete"
+                    >
+                      <Trash size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
@@ -202,16 +214,20 @@ export default function ApplicationDetail() {
         <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-lg p-6 hover:border-brand-500 transition-colors">
           <Upload className="h-6 w-6 text-slate-400 mb-2" />
           <span className="text-xs text-slate-500 font-medium mb-3">Upload other files (PDF, DOCX)</span>
-          <label className="cursor-pointer inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors">
-            Upload File
-            <input 
-              type="file" 
-              accept=".pdf,.docx" 
-              onChange={(e) => handleUpload(e, 'OTHER')} 
-              className="hidden" 
-              disabled={uploading}
-            />
-          </label>
+          {isDemo ? (
+            <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-2.5 py-1 rounded">Upload disabled in demo</span>
+          ) : (
+            <label className="cursor-pointer inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors">
+              Upload File
+              <input
+                type="file"
+                accept=".pdf,.docx"
+                onChange={(e) => handleUpload(e, 'OTHER')}
+                className="hidden"
+                disabled={uploading}
+              />
+            </label>
+          )}
         </div>
       </div>
     );
@@ -223,6 +239,13 @@ export default function ApplicationDetail() {
         <ArrowLeft size={16} /> Back to Applications
       </button>
 
+      {isDemo && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm flex items-center gap-3">
+          <AlertCircle size={20} className="text-amber-600 flex-shrink-0" />
+          <span>You are logged in as a <strong>Demo User</strong>. Edits, deletions, and uploads are restricted to read-only.</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -230,14 +253,16 @@ export default function ApplicationDetail() {
           <p className="mt-1 text-lg text-slate-600">{app.companyName}</p>
           <div className="mt-2"><StatusBadge status={app.status} /></div>
         </div>
-        <div className="flex gap-2">
-          <Link to={`/applications/${app.id}/edit`} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-            <Edit size={16} /> Edit
-          </Link>
-          <button onClick={() => setShowDelete(true)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50">
-            <Trash2 size={16} /> Delete
-          </button>
-        </div>
+        {!isDemo && (
+          <div className="flex gap-2">
+            <Link to={`/applications/${app.id}/edit`} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <Edit size={16} /> Edit
+            </Link>
+            <button onClick={() => setShowDelete(true)} className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50">
+              <Trash2 size={16} /> Delete
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tab Selectors */}

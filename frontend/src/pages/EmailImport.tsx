@@ -14,11 +14,14 @@ import {
   Check
 } from 'lucide-react';
 import { jobApplicationApi } from '../api/jobApplicationApi';
+import { useAuth } from '../context/AuthContext';
 import { STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS } from '../types';
 import type { EmailParseResponse, ApplicationStatus, JobApplication, ApplicationPriority } from '../types';
 
 export default function EmailImport() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isDemo = user?.demoAccount || false;
   const [step, setStep] = useState<'input' | 'preview' | 'success'>('input');
   
   // Input Step States
@@ -163,6 +166,13 @@ export default function EmailImport() {
           <span className={step === 'success' ? 'text-brand-600' : 'text-slate-600'}>Success</span>
         </div>
       </div>
+
+      {isDemo && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 shadow-sm flex items-center gap-3">
+          <AlertTriangle size={20} className="text-amber-600 flex-shrink-0" />
+          <span>You are logged in as a <strong>Demo User</strong>. You can parse emails to preview extracted data, but confirming imports is disabled.</span>
+        </div>
+      )}
 
       {/* Step 1: Input Textarea */}
       {step === 'input' && (
@@ -388,7 +398,7 @@ export default function EmailImport() {
                   <button
                     type="submit"
                     className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:bg-slate-300"
-                    disabled={isSaving}
+                    disabled={isSaving || isDemo}
                   >
                     {isSaving ? (
                       <>

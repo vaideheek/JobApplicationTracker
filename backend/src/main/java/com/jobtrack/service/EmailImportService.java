@@ -6,6 +6,7 @@ import com.jobtrack.dto.JobApplicationResponse;
 import com.jobtrack.dto.PrioritySuggestionResponse;
 import com.jobtrack.entity.JobApplication;
 import com.jobtrack.entity.StatusHistory;
+import com.jobtrack.entity.User;
 import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.repository.JobApplicationRepository;
 import com.jobtrack.repository.StatusHistoryRepository;
@@ -26,6 +27,7 @@ public class EmailImportService {
     private final EmailParser emailParser;
     private final JobApplicationService jobApplicationService;
     private final PrioritySuggestionService prioritySuggestionService;
+    private final CurrentUserService currentUserService;
 
     public EmailParseResponse parseEmail(EmailParseRequest request) {
         EmailParseResponse response = emailParser.parse(request.getRawEmailText());
@@ -38,19 +40,20 @@ public class EmailImportService {
 
     @Transactional
     public JobApplicationResponse confirmImport(EmailParseResponse request) {
+        currentUserService.verifyNotDemo();
+        User user = currentUserService.getCurrentUser();
+
         Optional<JobApplication> existingAppOpt = jobApplicationRepository
-                .findByCompanyNameIgnoreCaseAndJobTitleIgnoreCase(request.getCompanyName(), request.getJobTitle());
+                .findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId(request.getCompanyName(), request.getJobTitle(), user.getId());
 
         JobApplication application;
         ApplicationStatus oldStatus = null;
-        boolean isNew = false;
 
         if (existingAppOpt.isPresent()) {
             application = existingAppOpt.get();
             oldStatus = application.getStatus();
 
             // Do not automatically overwrite existing important fields with empty parsed values.
-            // Only update fields when the parsed/edited value is not null/blank.
             if (request.getCompanyName() != null && !request.getCompanyName().isBlank()) {
                 application.setCompanyName(request.getCompanyName());
             }
@@ -74,9 +77,7 @@ public class EmailImportService {
                 application.setPriority(request.getPriority());
             }
 
-            // Date mapping for existing application:
-            // Use importantDate mainly as followUpDate for interviews/assessments.
-            // For rejected/offers (or other statuses), do not change dateApplied on existing apps.
+            // Date mapping for existing application
             if (request.getImportantDate() != null) {
                 if (request.getStatus() == ApplicationStatus.INTERVIEW || request.getStatus() == ApplicationStatus.ASSESSMENT) {
                     application.setFollowUpDate(request.getImportantDate());
@@ -109,9 +110,9 @@ public class EmailImportService {
             statusHistoryRepository.save(history);
 
         } else {
-            isNew = true;
             // Create new application
             application = new JobApplication();
+            application.setUser(user);
             application.setCompanyName(request.getCompanyName());
             application.setJobTitle(request.getJobTitle());
             application.setStatus(request.getStatus());
@@ -121,10 +122,7 @@ public class EmailImportService {
             application.setNotes(request.getSuggestedNotes());
             application.setPriority(request.getPriority());
 
-            // Date mapping for new application:
-            // For new applications, use today as dateApplied unless the email clearly says "applied on"
-            // Wait, we can assume if status is APPLIED or IN_REVIEW, and importantDate is set, it might be the application date.
-            // For interviews/assessments, importantDate is the followUpDate, and dateApplied is today.
+            // Date mapping for new application
             if (request.getStatus() == ApplicationStatus.INTERVIEW || request.getStatus() == ApplicationStatus.ASSESSMENT) {
                 application.setDateApplied(LocalDate.now());
                 application.setFollowUpDate(request.getImportantDate());

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { STATUS_OPTIONS, STATUS_LABELS, PRIORITY_OPTIONS } from '../types';
 import type { JobApplicationRequest, ApplicationStatus, ApplicationPriority } from '../types';
 import { jobApplicationApi } from '../api/jobApplicationApi';
+import { useAuth } from '../context/AuthContext';
 
 interface ApplicationFormProps {
   initialData?: JobApplicationRequest;
@@ -34,6 +35,8 @@ export default function ApplicationForm({
   onSubmit,
   submitLabel,
 }: ApplicationFormProps) {
+  const { user } = useAuth();
+  const isDemo = user?.demoAccount || false;
   const [form, setForm] = useState<JobApplicationRequest>(initialData || emptyForm);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -353,11 +356,16 @@ export default function ApplicationForm({
       </div>
 
       {/* Submit */}
-      <div className="flex justify-end gap-3 pt-2">
+      <div className="flex items-center justify-end gap-3 pt-2">
+        {isDemo && (
+          <span className="text-xs text-amber-600 font-semibold bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+            Form submission is disabled in demo mode
+          </span>
+        )}
         <button
           id="submit-application-btn"
           type="submit"
-          disabled={loading}
+          disabled={loading || isDemo}
           className="rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
         >
           {loading ? 'Saving...' : submitLabel}

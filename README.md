@@ -195,7 +195,7 @@ For step-by-step instructions on deploying the application to production (Koyeb,
 
 - [ ] Gmail integration for automatic application tracking
 - [ ] AI-powered email parsing
-- [x] User authentication (JWT)
+- [x] User authentication (Session-based)
 - [x] Resume/document attachments
 - [ ] Interview scheduling
 - [ ] Analytics and reporting

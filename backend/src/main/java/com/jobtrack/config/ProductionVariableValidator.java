@@ -6,21 +6,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import java.util.Base64;
-
 @Component
 @Profile("prod")
 @Slf4j
 public class ProductionVariableValidator {
 
-    @Value("${app.admin.email:}")
-    private String adminEmail;
+    @Value("${app.admin.username:${app.admin.email:}}")
+    private String adminUsername;
 
     @Value("${app.admin.password:}")
     private String adminPassword;
-
-    @Value("${app.jwt.secret:}")
-    private String jwtSecret;
 
     @Value("${spring.datasource.url:}")
     private String dbUrl;
@@ -44,25 +39,11 @@ public class ProductionVariableValidator {
     public void validate() {
         log.info("Validating production environment variables...");
 
-        if (adminEmail == null || adminEmail.isBlank()) {
-            throw new IllegalStateException("Production startup failed: APP_ADMIN_EMAIL environment variable is missing");
+        if (adminUsername == null || adminUsername.isBlank()) {
+            throw new IllegalStateException("Production startup failed: APP_ADMIN_EMAIL/APP_ADMIN_USERNAME environment variable is missing");
         }
         if (adminPassword == null || adminPassword.isBlank()) {
             throw new IllegalStateException("Production startup failed: APP_ADMIN_PASSWORD environment variable is missing");
-        }
-        if (jwtSecret == null || jwtSecret.isBlank()) {
-            throw new IllegalStateException("Production startup failed: APP_JWT_SECRET environment variable is missing");
-        }
-
-        byte[] decodedKey;
-        try {
-            decodedKey = Base64.getDecoder().decode(jwtSecret.trim());
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("Production startup failed: APP_JWT_SECRET must be a valid Base64-encoded string", e);
-        }
-
-        if (decodedKey.length < 32) {
-            throw new IllegalStateException("Production startup failed: APP_JWT_SECRET must be at least 256 bits (32 bytes) after base64 decoding");
         }
 
         if (dbUrl == null || dbUrl.isBlank() || dbUrl.contains("localhost") || dbUrl.contains("127.0.0.1")) {
