@@ -91,10 +91,7 @@ public class AuthController {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(username, request.getPassword())
         );
-        SecurityContextHolder.getContext().setAuthentication(authentication);
-
-        HttpSession session = httpRequest.getSession(true);
-        session.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
+        establishAuthenticatedSession(httpRequest, authentication);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(toAuthUserResponse(user));
     }
@@ -125,21 +122,7 @@ public class AuthController {
                     new UsernamePasswordAuthenticationToken(username, request.getPassword())
             );
 
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            // Invalidate old session and create a new one to prevent session fixation attacks
-            HttpSession oldSession = httpRequest.getSession(false);
-            if (oldSession != null) {
-                oldSession.invalidate();
-            }
-            HttpSession newSession = httpRequest.getSession(true);
-            newSession.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
-
-            // Rotate/save a fresh CSRF token for the new session
-            org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository csrfRepository = new org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository();
-            org.springframework.security.web.csrf.CsrfToken newCsrfToken = csrfRepository.generateToken(httpRequest);
-            csrfRepository.saveToken(newCsrfToken, httpRequest, null);
-            httpRequest.setAttribute(org.springframework.security.web.csrf.CsrfToken.class.getName(), newCsrfToken);
+            establishAuthenticatedSession(httpRequest, authentication);
 
             return ResponseEntity.ok(toAuthUserResponse(user));
         } catch (BadCredentialsException e) {
@@ -180,6 +163,22 @@ public class AuthController {
         }
 
         return ResponseEntity.ok(toAuthUserResponse(user));
+    }
+
+    private void establishAuthenticatedSession(HttpServletRequest httpRequest, Authentication authentication) {
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        HttpSession oldSession = httpRequest.getSession(false);
+        if (oldSession != null) {
+            oldSession.invalidate();
+        }
+        HttpSession newSession = httpRequest.getSession(true);
+        newSession.setAttribute("SPRING_SECURITY_CONTEXT", SecurityContextHolder.getContext());
+
+        org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository csrfRepository = new org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository();
+        org.springframework.security.web.csrf.CsrfToken newCsrfToken = csrfRepository.generateToken(httpRequest);
+        csrfRepository.saveToken(newCsrfToken, httpRequest, null);
+        httpRequest.setAttribute(org.springframework.security.web.csrf.CsrfToken.class.getName(), newCsrfToken);
     }
 
     private AuthUserResponse toAuthUserResponse(User user) {

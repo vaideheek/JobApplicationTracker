@@ -29,9 +29,6 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins:http://localhost:5173,http://localhost:3000}")
     private String allowedOriginsProp;
 
-    @Value("${app.security.csrf.enabled:false}")
-    private boolean csrfEnabled;
-
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -100,8 +97,8 @@ public class SecurityConfig {
             config.setAllowedOrigins(List.of("http://localhost:5173", "http://localhost:3000"));
         }
         
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-XSRF-TOKEN"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-CSRF-TOKEN", "X-XSRF-TOKEN"));
         config.setExposedHeaders(List.of("Set-Cookie"));
         config.setAllowCredentials(true);
 

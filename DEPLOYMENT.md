@@ -37,6 +37,8 @@ graph TD
 | `APP_CORS_ALLOWED_ORIGINS` | Comma-separated allowed frontend origins | `https://jobapplicationtracker-129.pages.dev` |
 | `APP_ADMIN_EMAIL` | Initial admin account email (for seeding; APP_ADMIN_USERNAME is supported as an optional alias) | `admin@yourdomain.com` |
 | `APP_ADMIN_PASSWORD` | Initial admin account password (for seeding) | `<password>` |
+| `APP_DEMO_USERNAME` | Demo account username (optional, defaults to `demo`) | `demo` |
+| `APP_DEMO_PASSWORD` | Demo account password (optional, demo seeder runs in production only if provided) | `<password>` |
 | `APP_STORAGE_PROVIDER` | Swappable storage configuration | `r2` |
 | `R2_ENDPOINT` | Account S3 API URL (R2 Dashboard) | `https://<account-id>.r2.cloudflarestorage.com` |
 | `R2_ACCESS_KEY_ID` | Cloudflare API Token Access Key | `<access-key>` |

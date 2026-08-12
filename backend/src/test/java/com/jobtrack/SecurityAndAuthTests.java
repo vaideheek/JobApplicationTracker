@@ -58,6 +58,9 @@ public class SecurityAndAuthTests {
     @Autowired
     private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private AuthController authController;
+
     private User ownerUser;
     private User otherUser;
     private User demoUser;
@@ -126,7 +129,8 @@ public class SecurityAndAuthTests {
     }
 
     @Test
-    void testSignupWithCsrfSucceeds() throws Exception {
+    void testSignupWithCsrfSucceedsAndRotatesSession() throws Exception {
+        userRepository.findByUsernameIgnoreCase("newuser").ifPresent(userRepository::delete);
         CsrfInfo csrf = getCsrfTokenAndSession();
 
         AuthController.SignupRequest request = new AuthController.SignupRequest();
@@ -134,17 +138,68 @@ public class SecurityAndAuthTests {
         request.setPassword("securePassword");
         request.setDisplayName("New User");
 
-        mockMvc.perform(post("/api/auth/signup")
+        MvcResult signupResult = mockMvc.perform(post("/api/auth/signup")
                 .session(csrf.session)
                 .header(csrf.headerName, csrf.token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.username").value("newuser"))
-                .andExpect(jsonPath("$.displayName").value("New User"));
+                .andReturn();
+
+        MockHttpSession newSession = (MockHttpSession) signupResult.getRequest().getSession(false);
+        assertNotNull(newSession);
+        assertNotEquals(csrf.session.getId(), newSession.getId());
+
+        // Extract the new rotated CSRF token
+        org.springframework.security.web.csrf.CsrfToken newCsrf =
+            (org.springframework.security.web.csrf.CsrfToken) signupResult.getRequest().getAttribute(org.springframework.security.web.csrf.CsrfToken.class.getName());
+        assertNotNull(newCsrf);
+        assertNotEquals(csrf.token, newCsrf.getToken());
+
+        // Prove the new token is usable by doing a write action using the new session and new token
+        JobApplication app = JobApplication.builder()
+                .companyName("Test Rotated")
+                .jobTitle("Engineer")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.now())
+                .build();
+
+        mockMvc.perform(post("/api/applications")
+                .session(newSession)
+                .header(newCsrf.getHeaderName(), newCsrf.getToken())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(app)))
+                .andExpect(status().isCreated());
 
         User saved = userRepository.findByUsernameIgnoreCase("newuser").orElseThrow();
         assertTrue(passwordEncoder.matches("securePassword", saved.getPasswordHash()));
+        userRepository.delete(saved);
+    }
+
+    @Test
+    void testSignupDisabledReturns403AndCreatesNoUser() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(authController, "signupEnabled", false);
+        try {
+            CsrfInfo csrf = getCsrfTokenAndSession();
+
+            AuthController.SignupRequest request = new AuthController.SignupRequest();
+            request.setUsername("disuser");
+            request.setPassword("securePassword");
+            request.setDisplayName("Disabled User");
+
+            mockMvc.perform(post("/api/auth/signup")
+                    .session(csrf.session)
+                    .header(csrf.headerName, csrf.token)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.message").value("Sign-up is currently disabled."));
+
+            assertFalse(userRepository.existsByUsernameIgnoreCase("disuser"));
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(authController, "signupEnabled", true);
+        }
     }
 
     @Test
@@ -490,23 +545,38 @@ public class SecurityAndAuthTests {
     }
 
     @Test
-    void testAdministratorSeedingDoesNotDuplicate() {
+    void testAdministratorSeedingConfigurationAndLifecycle() {
+        userRepository.findByUsernameIgnoreCase("test_seeder_admin").ifPresent(userRepository::delete);
         long countBefore = userRepository.count();
-        assertTrue(countBefore > 0);
 
         com.jobtrack.config.AdminUserSeeder seeder = new com.jobtrack.config.AdminUserSeeder(userRepository, jobApplicationRepository, passwordEncoder, jdbcTemplate);
+
+        org.springframework.test.util.ReflectionTestUtils.setField(seeder, "adminUsername", "test_seeder_admin");
+        org.springframework.test.util.ReflectionTestUtils.setField(seeder, "adminPassword", "adminPass123");
+
         seeder.run();
 
-        assertEquals(countBefore, userRepository.count());
+        assertEquals(countBefore + 1, userRepository.count());
+        User seededAdmin = userRepository.findByUsernameIgnoreCase("test_seeder_admin").orElseThrow();
+        assertEquals("ROLE_ADMIN", seededAdmin.getRole());
+        assertTrue(passwordEncoder.matches("adminPass123", seededAdmin.getPasswordHash()));
+
+        seeder.run();
+        assertEquals(countBefore + 1, userRepository.count());
+
+        userRepository.delete(seededAdmin);
     }
 
     @Test
-    void testCorsOriginParsing() throws Exception {
-        mockMvc.perform(options("/api/applications")
+    void testCorsPreflightWithCsrf() throws Exception {
+        mockMvc.perform(options("/api/auth/login")
                 .header(HttpHeaders.ORIGIN, "http://localhost:5173")
-                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
-                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Content-Type"))
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "POST")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "Content-Type, X-CSRF-TOKEN"))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"));
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_METHODS, org.hamcrest.Matchers.containsString("POST")))
+                .andExpect(header().string(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS, org.hamcrest.Matchers.containsString("X-CSRF-TOKEN")));
     }
 }

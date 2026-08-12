@@ -189,7 +189,7 @@ docker compose down -v
 
 ## Production Deployment
 
-For step-by-step instructions on deploying the application to production (Koyeb, Neon, Cloudflare Pages, Cloudflare R2), credentials rotation policies, and security configurations, please refer to [DEPLOYMENT.md](DEPLOYMENT.md).
+For step-by-step instructions on deploying the application to production (Render, Neon, Cloudflare Pages, Cloudflare R2), credentials rotation policies, and security configurations, please refer to [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Future Roadmap
 

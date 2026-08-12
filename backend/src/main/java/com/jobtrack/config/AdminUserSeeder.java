@@ -56,7 +56,7 @@ public class AdminUserSeeder implements CommandLineRunner {
                         .username(usernameNorm)
                         .passwordHash(passwordEncoder.encode(adminPassword))
                         .displayName("Primary Owner")
-                        .role("ROLE_USER")
+                        .role("ROLE_ADMIN")
                         .enabled(true)
                         .demoAccount(false)
                         .createdAt(LocalDateTime.now())
@@ -93,13 +93,20 @@ public class AdminUserSeeder implements CommandLineRunner {
         User placeholder = userRepository.findByUsernameIgnoreCase("migration_placeholder").orElse(null);
         if (placeholder != null) {
             log.info("Found migration placeholder owner. Processing transition...");
+            if (realAdmin == null) {
+                // Try to find any existing administrator in the database
+                realAdmin = userRepository.findAll().stream()
+                        .filter(u -> "ROLE_ADMIN".equalsIgnoreCase(u.getRole()))
+                        .findFirst()
+                        .orElse(null);
+            }
             if (realAdmin != null) {
                 log.info("Reassigning applications from placeholder to administrator: {}", realAdmin.getUsername());
                 jobApplicationRepository.reassignApplications(placeholder.getId(), realAdmin);
                 userRepository.delete(placeholder);
                 log.info("Placeholder owner successfully removed.");
             } else {
-                log.error("Migration placeholder exists but no real administrator is configured to take ownership!");
+                throw new IllegalStateException("Production startup failed: migration placeholder user exists but no real administrator account is configured or available in the database to receive ownership.");
             }
         }
     }

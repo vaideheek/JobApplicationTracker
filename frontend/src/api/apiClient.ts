@@ -4,9 +4,6 @@ import { getApiBaseUrl } from './apiUrl';
 // Create a single shared Axios instance
 export const api = axios.create({
   baseURL: getApiBaseUrl(),
-  headers: {
-    'Content-Type': 'application/json',
-  },
   withCredentials: true, // send/receive the session cookie
 });
 
