@@ -36,7 +36,7 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
 
     @Query("SELECT COUNT(j) FROM JobApplication j WHERE " +
            "j.user.id = :userId AND " +
-           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.OFFER) " +
+           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.NO_RESPONSE, com.jobtrack.enums.ApplicationStatus.OFFER) " +
            "AND j.followUpDate IS NOT NULL AND j.followUpDate <= :today")
     long countFollowUpNeeded(@Param("today") LocalDate today, @Param("userId") Long userId);
 
@@ -48,13 +48,13 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
 
     @Query("SELECT COUNT(j) FROM JobApplication j WHERE " +
            "j.user.id = :userId AND " +
-           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.OFFER) " +
+           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.NO_RESPONSE, com.jobtrack.enums.ApplicationStatus.OFFER) " +
            "AND j.lastUpdatedAt <= :staleTime")
     long countStaleApplications(@Param("staleTime") LocalDateTime staleTime, @Param("userId") Long userId);
 
     @Query("SELECT COUNT(j) FROM JobApplication j WHERE " +
            "j.user.id = :userId AND " +
-           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.OFFER) " +
+           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.NO_RESPONSE, com.jobtrack.enums.ApplicationStatus.OFFER) " +
            "AND (" +
            "  (SELECT COUNT(d) FROM ApplicationDocument d WHERE d.jobApplication = j AND d.documentType = com.jobtrack.enums.DocumentType.CV) = 0 " +
            "  OR " +
@@ -64,7 +64,7 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
 
     @Query("SELECT j FROM JobApplication j WHERE " +
            "j.user.id = :userId AND " +
-           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.OFFER)")
+           "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.NO_RESPONSE, com.jobtrack.enums.ApplicationStatus.OFFER)")
     List<JobApplication> findActiveApplications(@Param("userId") Long userId);
 
     @Query("SELECT j.companyName, COUNT(j) FROM JobApplication j WHERE j.user.id = :userId GROUP BY j.companyName ORDER BY COUNT(j) DESC")

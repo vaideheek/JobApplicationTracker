@@ -61,9 +61,16 @@ public class PrioritySuggestionService {
             LocalDate followUpDate,
             LocalDate deadlineDate
     ) {
-        // Absolute Override Rule: REJECTED or WITHDRAWN -> LOW
-        if (status == ApplicationStatus.REJECTED || status == ApplicationStatus.WITHDRAWN) {
-            String statusLabel = status == ApplicationStatus.REJECTED ? "rejected" : "withdrawn";
+        // Absolute Override Rule: REJECTED, WITHDRAWN or NO_RESPONSE -> LOW
+        if (status == ApplicationStatus.REJECTED || status == ApplicationStatus.WITHDRAWN || status == ApplicationStatus.NO_RESPONSE) {
+            String statusLabel;
+            if (status == ApplicationStatus.REJECTED) {
+                statusLabel = "rejected";
+            } else if (status == ApplicationStatus.WITHDRAWN) {
+                statusLabel = "withdrawn";
+            } else {
+                statusLabel = "no response received";
+            }
             return PrioritySuggestionResponse.builder()
                     .priority(ApplicationPriority.LOW)
                     .explanation("application is " + statusLabel)
