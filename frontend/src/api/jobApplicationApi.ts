@@ -10,6 +10,9 @@ import type {
   PrioritySuggestionResponse,
   DashboardInsightsResponse,
   ApplicationDocument,
+  BulkScanResponse,
+  BulkConfirmRequest,
+  BulkConfirmResponse,
 } from '../types';
 
 export const jobApplicationApi = {
@@ -96,6 +99,24 @@ export const jobApplicationApi = {
     const { data } = await api.get(`/applications/${applicationId}/documents/${documentId}`, {
       responseType: 'blob',
     });
+    return data;
+  },
+
+  scanZipFiles: async (
+    manifest: File,
+    laptopZip: File,
+    googleDriveZip: File
+  ): Promise<BulkScanResponse> => {
+    const formData = new FormData();
+    formData.append('manifest', manifest);
+    formData.append('laptopZip', laptopZip);
+    formData.append('googleDriveZip', googleDriveZip);
+    const { data } = await api.post('/bulk-import/scan', formData);
+    return data;
+  },
+
+  confirmBulkImport: async (request: BulkConfirmRequest): Promise<BulkConfirmResponse> => {
+    const { data } = await api.post('/bulk-import/confirm', request);
     return data;
   },
 };

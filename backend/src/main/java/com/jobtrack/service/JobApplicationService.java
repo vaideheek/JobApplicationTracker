@@ -16,6 +16,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -74,7 +75,13 @@ public class JobApplicationService {
         application.setCompanyCareerUrl(request.getCompanyCareerUrl());
         application.setSalaryRange(request.getSalaryRange());
         application.setPriority(request.getPriority());
-        application.setFollowUpDate(request.getFollowUpDate());
+        if (request.getStatus() == ApplicationStatus.REJECTED
+            || request.getStatus() == ApplicationStatus.WITHDRAWN
+            || request.getStatus() == ApplicationStatus.NO_RESPONSE) {
+            application.setFollowUpDate(null);
+        } else {
+            application.setFollowUpDate(request.getFollowUpDate());
+        }
         application.setDeadlineDate(request.getDeadlineDate());
         application.setJobDescription(request.getJobDescription());
         application.setJobDescriptionSummary(request.getJobDescriptionSummary());
@@ -132,6 +139,13 @@ public class JobApplicationService {
     // --- Mapping helpers ---
 
     private JobApplication mapToEntity(JobApplicationRequest request, User user) {
+        LocalDate followUp = request.getFollowUpDate();
+        if (request.getStatus() == ApplicationStatus.REJECTED
+            || request.getStatus() == ApplicationStatus.WITHDRAWN
+            || request.getStatus() == ApplicationStatus.NO_RESPONSE) {
+            followUp = null;
+        }
+
         return JobApplication.builder()
                 .user(user)
                 .companyName(request.getCompanyName())
@@ -147,7 +161,7 @@ public class JobApplicationService {
                 .companyCareerUrl(request.getCompanyCareerUrl())
                 .salaryRange(request.getSalaryRange())
                 .priority(request.getPriority())
-                .followUpDate(request.getFollowUpDate())
+                .followUpDate(followUp)
                 .deadlineDate(request.getDeadlineDate())
                 .jobDescription(request.getJobDescription())
                 .jobDescriptionSummary(request.getJobDescriptionSummary())

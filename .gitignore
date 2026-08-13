@@ -36,3 +36,5 @@ frontend/tsconfig.tsbuildinfo
 # Local Database Dumps
 jobtrack-before-auth.sql
 
+# Private Import Data
+/private-import-data/

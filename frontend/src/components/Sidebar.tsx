@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, List, PlusCircle, Briefcase, Mail, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Briefcase, Mail, LogOut, User, FolderUp } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const navItems = [
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/applications', label: 'Applications', icon: List },
   { to: '/applications/new', label: 'Add New', icon: PlusCircle },
   { to: '/email-import', label: 'Email Import', icon: Mail },
+  { to: '/bulk-import', label: 'Bulk Import', icon: FolderUp },
 ];
 
 export default function Sidebar() {

@@ -5,7 +5,8 @@ export type ApplicationStatus =
   | 'INTERVIEW'
   | 'OFFER'
   | 'REJECTED'
-  | 'WITHDRAWN';
+  | 'WITHDRAWN'
+  | 'NO_RESPONSE';
 
 export type ApplicationPriority = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -95,6 +96,7 @@ export const STATUS_OPTIONS: ApplicationStatus[] = [
   'OFFER',
   'REJECTED',
   'WITHDRAWN',
+  'NO_RESPONSE',
 ];
 
 export const PRIORITY_OPTIONS: ApplicationPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
@@ -107,6 +109,7 @@ export const STATUS_LABELS: Record<ApplicationStatus, string> = {
   OFFER: 'Offer',
   REJECTED: 'Rejected',
   WITHDRAWN: 'Withdrawn',
+  NO_RESPONSE: 'No Response',
 };
 
 export const STATUS_COLORS: Record<ApplicationStatus, string> = {
@@ -117,6 +120,7 @@ export const STATUS_COLORS: Record<ApplicationStatus, string> = {
   OFFER: 'bg-emerald-100 text-emerald-800',
   REJECTED: 'bg-red-100 text-red-800',
   WITHDRAWN: 'bg-gray-100 text-gray-600',
+  NO_RESPONSE: 'bg-slate-100 text-slate-600',
 };
 
 export interface EmailParseRequest {
@@ -180,4 +184,60 @@ export interface DashboardInsightsResponse {
   recommendedActions: RecommendedAction[];
 }
 
+export interface ScannedDocumentPreview {
+  tempDocId: string;
+  fileName: string;
+  documentType: string;
+  fileSize: number;
+  sha256: string;
+  validationStatus: string;
+}
 
+export interface ScannedApplicationGroup {
+  tempAppId: string;
+  companyName: string;
+  jobTitle: string;
+  dateApplied: string | null;
+  status: string;
+  priority: string;
+  isDuplicate: boolean;
+  existingApplicationId: number | null;
+  documents: ScannedDocumentPreview[];
+}
+
+export interface BulkScanResponse {
+  scanId: string;
+  applications: ScannedApplicationGroup[];
+  unassignedFiles: ScannedDocumentPreview[];
+}
+
+export interface BulkConfirmDocument {
+  tempDocId: string;
+  documentType: string;
+}
+
+export interface BulkConfirmApplication {
+  tempAppId: string | null;
+  companyName: string;
+  jobTitle: string;
+  status: string;
+  priority: string;
+  dateApplied: string | null;
+  documents: BulkConfirmDocument[];
+}
+
+export interface BulkConfirmRequest {
+  scanId: string;
+  applications: BulkConfirmApplication[];
+}
+
+export interface DocumentFailureInfo {
+  fileName: string;
+  error: string;
+}
+
+export interface BulkConfirmResponse {
+  successCount: number;
+  failureCount: number;
+  documentFailures: DocumentFailureInfo[];
+}
