@@ -79,10 +79,11 @@ public class JobApplicationService {
             || request.getStatus() == ApplicationStatus.WITHDRAWN
             || request.getStatus() == ApplicationStatus.NO_RESPONSE) {
             application.setFollowUpDate(null);
+            application.setDeadlineDate(null);
         } else {
             application.setFollowUpDate(request.getFollowUpDate());
+            application.setDeadlineDate(request.getDeadlineDate());
         }
-        application.setDeadlineDate(request.getDeadlineDate());
         application.setJobDescription(request.getJobDescription());
         application.setJobDescriptionSummary(request.getJobDescriptionSummary());
         application.setOriginalJobUrl(request.getOriginalJobUrl());
@@ -140,10 +141,12 @@ public class JobApplicationService {
 
     private JobApplication mapToEntity(JobApplicationRequest request, User user) {
         LocalDate followUp = request.getFollowUpDate();
+        LocalDate deadline = request.getDeadlineDate();
         if (request.getStatus() == ApplicationStatus.REJECTED
             || request.getStatus() == ApplicationStatus.WITHDRAWN
             || request.getStatus() == ApplicationStatus.NO_RESPONSE) {
             followUp = null;
+            deadline = null;
         }
 
         return JobApplication.builder()
@@ -162,7 +165,7 @@ public class JobApplicationService {
                 .salaryRange(request.getSalaryRange())
                 .priority(request.getPriority())
                 .followUpDate(followUp)
-                .deadlineDate(request.getDeadlineDate())
+                .deadlineDate(deadline)
                 .jobDescription(request.getJobDescription())
                 .jobDescriptionSummary(request.getJobDescriptionSummary())
                 .originalJobUrl(request.getOriginalJobUrl())

@@ -202,6 +202,9 @@ export interface ScannedApplicationGroup {
   priority: string;
   isDuplicate: boolean;
   existingApplicationId: number | null;
+  stage: string | null;
+  source: string | null;
+  notes: string | null;
   documents: ScannedDocumentPreview[];
 }
 
@@ -223,6 +226,9 @@ export interface BulkConfirmApplication {
   status: string;
   priority: string;
   dateApplied: string | null;
+  stage: string | null;
+  source: string | null;
+  notes: string | null;
   documents: BulkConfirmDocument[];
 }
 

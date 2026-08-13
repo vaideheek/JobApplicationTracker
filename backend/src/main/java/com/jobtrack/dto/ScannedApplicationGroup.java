@@ -16,5 +16,8 @@ public class ScannedApplicationGroup {
     private String priority;
     private boolean isDuplicate;
     private Long existingApplicationId;
+    private String stage;
+    private String source;
+    private String notes;
     private List<ScannedDocumentPreview> documents;
 }

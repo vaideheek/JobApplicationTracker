@@ -11,7 +11,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
@@ -37,11 +40,25 @@ public class BulkImportService {
     private final DocumentStorageService storageService;
     private final CurrentUserService currentUserService;
     private final ObjectMapper objectMapper;
+    private final StatusHistoryRepository statusHistoryRepository;
+    private final PlatformTransactionManager transactionManager;
 
     private static final long MAX_ZIP_EXPANDED_SIZE = 200 * 1024 * 1024; // 200 MB
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
     private static final int MAX_RAW_ENTRIES = 1000;
     private static final int MAX_SUPPORTED_DOCUMENTS = 400;
+
+    private static class ZipFileInfo {
+        String sha256;
+        long sizeBytes;
+        String tempFilePath;
+
+        ZipFileInfo(String sha256, long sizeBytes, String tempFilePath) {
+            this.sha256 = sha256;
+            this.sizeBytes = sizeBytes;
+            this.tempFilePath = tempFilePath;
+        }
+    }
 
     public BulkScanResponse scan(MultipartFile manifestFile, MultipartFile laptopZip, MultipartFile googleDriveZip) {
         currentUserService.verifyNotDemo();
@@ -67,23 +84,18 @@ public class BulkImportService {
                 throw new IllegalStateException("This manifest has already been successfully imported under batch: " + completedBatch.get().getId());
             }
 
-            // State mappings tracking
-            Map<String, String> shaToTempPath = new HashMap<>(); // unique files
-            Map<String, String> origNameToSha = new HashMap<>(); // file path in zip to SHA
-            Map<String, Long> origNameToSize = new HashMap<>();
+            // Maps tracking ZIP file entry paths to their hashes and sizes
+            Map<String, ZipFileInfo> laptopFiles = new HashMap<>();
+            Map<String, ZipFileInfo> driveFiles = new HashMap<>();
+            Map<String, String> shaToTempPath = new HashMap<>();
 
             int totalRawEntries = 0;
             long totalUncompressedBytes = 0;
             int totalExtractedDocs = 0;
-            int skippedDuplicatesCount = 0;
 
-            MultipartFile[] zipFiles = { laptopZip, googleDriveZip };
-
-            for (MultipartFile zipFile : zipFiles) {
-                if (zipFile == null || zipFile.isEmpty()) {
-                    continue;
-                }
-                try (ZipInputStream zis = new ZipInputStream(zipFile.getInputStream())) {
+            // 1. Process Laptop ZIP
+            if (laptopZip != null && !laptopZip.isEmpty()) {
+                try (ZipInputStream zis = new ZipInputStream(laptopZip.getInputStream())) {
                     ZipEntry entry;
                     while ((entry = zis.getNextEntry()) != null) {
                         totalRawEntries++;
@@ -92,14 +104,11 @@ public class BulkImportService {
                         }
 
                         String name = entry.getName();
-
-                        // ZIP-slip prevention
                         Path targetPath = tempDir.resolve(name).normalize();
                         if (!targetPath.startsWith(tempDir)) {
                             throw new SecurityException("ZIP slip attempt detected: " + name);
                         }
 
-                        // Ignore directories and system metadata
                         if (entry.isDirectory() || name.contains("__MACOSX") || Paths.get(name).getFileName().toString().startsWith("._")) {
                             continue;
                         }
@@ -109,7 +118,6 @@ public class BulkImportService {
                             throw new IllegalArgumentException("ZIP contains too many supported documents. Maximum allowed is " + MAX_SUPPORTED_DOCUMENTS);
                         }
 
-                        // Stream bytes and validate size
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
                         byte[] buffer = new byte[4096];
                         int bytesRead;
@@ -127,159 +135,266 @@ public class BulkImportService {
                         }
 
                         byte[] fileData = baos.toByteArray();
-                        String sha256 = getSha256(fileData);
+                        String sha = getSha256(fileData);
 
-                        origNameToSha.put(name, sha256);
-                        origNameToSize.put(name, fileBytesCount);
-
-                        if (shaToTempPath.containsKey(sha256)) {
-                            skippedDuplicatesCount++;
-                            continue; // exact duplicate skipped
+                        String tempFilePath = shaToTempPath.get(sha);
+                        if (tempFilePath == null) {
+                            String ext = "";
+                            int lastDot = name.lastIndexOf('.');
+                            if (lastDot != -1) ext = name.substring(lastDot);
+                            Path uniqueFilePath = filesDir.resolve(sha + ext);
+                            Files.write(uniqueFilePath, fileData);
+                            tempFilePath = uniqueFilePath.toString();
+                            shaToTempPath.put(sha, tempFilePath);
                         }
 
-                        // Save unique file named by SHA-256
-                        String ext = "";
-                        int lastDot = name.lastIndexOf('.');
-                        if (lastDot != -1) {
-                            ext = name.substring(lastDot);
-                        }
-                        Path uniqueFilePath = filesDir.resolve(sha256 + ext);
-                        Files.write(uniqueFilePath, fileData);
+                        laptopFiles.put(normalizePath(name), new ZipFileInfo(sha, fileBytesCount, tempFilePath));
+                    }
+                }
+            }
 
-                        shaToTempPath.put(sha256, uniqueFilePath.toString());
+            // 2. Process Google Drive ZIP
+            if (googleDriveZip != null && !googleDriveZip.isEmpty()) {
+                try (ZipInputStream zis = new ZipInputStream(googleDriveZip.getInputStream())) {
+                    ZipEntry entry;
+                    while ((entry = zis.getNextEntry()) != null) {
+                        totalRawEntries++;
+                        if (totalRawEntries > MAX_RAW_ENTRIES) {
+                            throw new IllegalArgumentException("ZIP contains too many raw entries. Maximum allowed is " + MAX_RAW_ENTRIES);
+                        }
+
+                        String name = entry.getName();
+                        Path targetPath = tempDir.resolve(name).normalize();
+                        if (!targetPath.startsWith(tempDir)) {
+                            throw new SecurityException("ZIP slip attempt detected: " + name);
+                        }
+
+                        if (entry.isDirectory() || name.contains("__MACOSX") || Paths.get(name).getFileName().toString().startsWith("._")) {
+                            continue;
+                        }
+
+                        totalExtractedDocs++;
+                        if (totalExtractedDocs > MAX_SUPPORTED_DOCUMENTS) {
+                            throw new IllegalArgumentException("ZIP contains too many supported documents. Maximum allowed is " + MAX_SUPPORTED_DOCUMENTS);
+                        }
+
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        byte[] buffer = new byte[4096];
+                        int bytesRead;
+                        long fileBytesCount = 0;
+                        while ((bytesRead = zis.read(buffer)) != -1) {
+                            fileBytesCount += bytesRead;
+                            totalUncompressedBytes += bytesRead;
+                            if (fileBytesCount > MAX_FILE_SIZE) {
+                                throw new IllegalArgumentException("File " + name + " exceeds maximum size of 10MB");
+                            }
+                            if (totalUncompressedBytes > MAX_ZIP_EXPANDED_SIZE) {
+                                throw new IllegalArgumentException("Total uncompressed ZIP size exceeds maximum limit of 200MB");
+                            }
+                            baos.write(buffer, 0, bytesRead);
+                        }
+
+                        byte[] fileData = baos.toByteArray();
+                        String sha = getSha256(fileData);
+
+                        String tempFilePath = shaToTempPath.get(sha);
+                        if (tempFilePath == null) {
+                            String ext = "";
+                            int lastDot = name.lastIndexOf('.');
+                            if (lastDot != -1) ext = name.substring(lastDot);
+                            Path uniqueFilePath = filesDir.resolve(sha + ext);
+                            Files.write(uniqueFilePath, fileData);
+                            tempFilePath = uniqueFilePath.toString();
+                            shaToTempPath.put(sha, tempFilePath);
+                        }
+
+                        driveFiles.put(normalizePath(name), new ZipFileInfo(sha, fileBytesCount, tempFilePath));
                     }
                 }
             }
 
             // Parse Manifest JSON
             JsonNode manifestNode = objectMapper.readTree(manifestBytes);
-            List<ScannedApplicationGroup> appPreviews = new ArrayList<>();
-            Set<String> mappedShats = new HashSet<>();
+            JsonNode appsNode = manifestNode.get("applications");
+            JsonNode docsNode = manifestNode.get("documents");
 
-            if (manifestNode.isArray()) {
-                for (JsonNode node : manifestNode) {
-                    String company = optString(node, "company", "companyName", "company_name", "employer");
-                    String title = optString(node, "position", "jobTitle", "job_title", "title", "role");
-                    String statusStr = optString(node, "status", "application_status", "state");
-                    String priorityStr = optString(node, "priority", "importance");
-                    String dateAppliedStr = optString(node, "dateApplied", "date_applied", "date");
-
-                    if (company.isEmpty() || title.isEmpty()) {
-                        continue;
-                    }
-
-                    // Apply terminal status cleanups for Dates
-                    ApplicationStatus status = ApplicationStatus.APPLIED;
-                    try {
-                        status = ApplicationStatus.valueOf(statusStr.toUpperCase().replace(" ", "_"));
-                    } catch (Exception ignored) {}
-
-                    ApplicationPriority priority = ApplicationPriority.MEDIUM;
-                    try {
-                        priority = ApplicationPriority.valueOf(priorityStr.toUpperCase());
-                    } catch (Exception ignored) {}
-
-                    boolean isDuplicate = false;
-                    Long existingId = null;
-                    Optional<JobApplication> existingApp = jobApplicationRepository.findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId(
-                            company, title, currentUser.getId()
-                    );
-                    if (existingApp.isPresent()) {
-                        isDuplicate = true;
-                        existingId = existingApp.get().getId();
-                    }
-
-                    List<ScannedDocumentPreview> docPreviews = new ArrayList<>();
-                    JsonNode filesNode = node.has("files") ? node.get("files") : (node.has("documents") ? node.get("documents") : node.get("attachments"));
-                    if (filesNode != null && filesNode.isArray()) {
-                        for (JsonNode fNode : filesNode) {
-                            String manifestPath = optString(fNode, "name", "path", "fileName", "filename");
-                            String docType = optString(fNode, "type", "documentType", "document_type");
-                            long expectedSize = fNode.has("size") ? fNode.get("size").asLong() : -1;
-                            String expectedSha = optString(fNode, "sha256", "hash");
-
-                            String validationStatus = "MISSING";
-                            String actualSha = origNameToSha.get(manifestPath);
-                            long actualSize = origNameToSize.getOrDefault(manifestPath, -1L);
-                            String tempDocId = UUID.randomUUID().toString();
-
-                            if (actualSha != null) {
-                                mappedShats.add(actualSha);
-                                if (expectedSha.equalsIgnoreCase(actualSha) && (expectedSize == -1 || expectedSize == actualSize)) {
-                                    validationStatus = "VALID";
-                                } else {
-                                    validationStatus = "CHANGED";
-                                }
-                            }
-
-                            docPreviews.add(ScannedDocumentPreview.builder()
-                                    .tempDocId(tempDocId)
-                                    .fileName(manifestPath)
-                                    .documentType(docType.toUpperCase())
-                                    .fileSize(actualSize != -1 ? actualSize : expectedSize)
-                                    .sha256(actualSha != null ? actualSha : expectedSha)
-                                    .validationStatus(validationStatus)
-                                    .build());
-                        }
-                    }
-
-                    appPreviews.add(ScannedApplicationGroup.builder()
-                            .tempAppId(UUID.randomUUID().toString())
-                            .companyName(company)
-                            .jobTitle(title)
-                            .dateApplied(dateAppliedStr.isEmpty() ? null : dateAppliedStr)
-                            .status(status.name())
-                            .priority(priority.name())
-                            .isDuplicate(isDuplicate)
-                            .existingApplicationId(existingId)
-                            .documents(docPreviews)
-                            .build());
-                }
+            if (appsNode == null || !appsNode.isArray()) {
+                throw new IllegalArgumentException("Invalid manifest schema: missing applications array.");
+            }
+            if (docsNode == null || !docsNode.isArray()) {
+                throw new IllegalArgumentException("Invalid manifest schema: missing documents array.");
             }
 
-            // Identify unassigned unique files (not mapped in manifest)
-            List<ScannedDocumentPreview> unassignedList = new ArrayList<>();
-            for (Map.Entry<String, String> entry : origNameToSha.entrySet()) {
-                String name = entry.getKey();
-                String sha = entry.getValue();
-
-                if (!mappedShats.contains(sha)) {
-                    String tempDocId = UUID.randomUUID().toString();
-                    long size = origNameToSize.getOrDefault(name, 0L);
-                    unassignedList.add(ScannedDocumentPreview.builder()
-                            .tempDocId(tempDocId)
-                            .fileName(name)
-                            .documentType("OTHER")
-                            .fileSize(size)
-                            .sha256(sha)
-                            .validationStatus("VALID")
-                            .build());
-                }
-            }
-
-            // Write metadata mapping mapping files
-            Map<String, Object> mappings = new HashMap<>();
-            mappings.put("shaToTempPath", shaToTempPath);
-            mappings.put("origNameToSha", origNameToSha);
-
+            boolean hasValidationErrors = false;
+            Set<String> matchedZipPaths = new HashSet<>();
             Map<String, String> docIdToSha = new HashMap<>();
             Map<String, String> docIdToOrigName = new HashMap<>();
-            for (ScannedApplicationGroup group : appPreviews) {
-                for (ScannedDocumentPreview doc : group.getDocuments()) {
-                    docIdToSha.put(doc.getTempDocId(), doc.getSha256());
-                    docIdToOrigName.put(doc.getTempDocId(), doc.getFileName());
+
+            // Map to store generated ScannedDocumentPreview for ATTACH documents grouped by manifestApplicationId
+            Map<String, List<ScannedDocumentPreview>> appDocPreviews = new HashMap<>();
+            List<ScannedDocumentPreview> unassignedList = new ArrayList<>();
+            long skippedDuplicatesCount = 0;
+
+            for (JsonNode docNode : docsNode) {
+                String disposition = optString(docNode, "disposition");
+                String appId = optString(docNode, "manifestApplicationId");
+                String sourceArchiveId = optString(docNode, "sourceArchiveId");
+                String relativePath = optString(docNode, "relativePath");
+                String filename = optString(docNode, "filename");
+                long sizeBytes = docNode.get("sizeBytes").asLong();
+                String sha256 = optString(docNode, "sha256");
+                String uploadDocType = optString(docNode, "uploadDocumentType");
+
+                String expectedPath = "";
+                if ("LAPTOP".equalsIgnoreCase(sourceArchiveId)) {
+                    expectedPath = "JobApps/" + relativePath;
+                } else if ("GOOGLE_DRIVE".equalsIgnoreCase(sourceArchiveId)) {
+                    expectedPath = "Jobs/" + relativePath;
+                }
+                String normExpected = normalizePath(expectedPath);
+                matchedZipPaths.add(normExpected);
+
+                ZipFileInfo zipInfo = null;
+                if ("LAPTOP".equalsIgnoreCase(sourceArchiveId)) {
+                    zipInfo = laptopFiles.get(normExpected);
+                } else if ("GOOGLE_DRIVE".equalsIgnoreCase(sourceArchiveId)) {
+                    zipInfo = driveFiles.get(normExpected);
+                }
+
+                String validationStatus = "MISSING";
+                long actualSize = -1;
+                String actualSha = null;
+
+                if (zipInfo != null) {
+                    actualSize = zipInfo.sizeBytes;
+                    actualSha = zipInfo.sha256;
+                    if (actualSha.equalsIgnoreCase(sha256) && actualSize == sizeBytes) {
+                        validationStatus = "VALID";
+                    } else {
+                        validationStatus = "CHANGED";
+                        hasValidationErrors = true;
+                    }
+                } else {
+                    hasValidationErrors = true;
+                }
+
+                String tempDocId = UUID.randomUUID().toString();
+                docIdToSha.put(tempDocId, actualSha != null ? actualSha : sha256);
+                docIdToOrigName.put(tempDocId, filename);
+
+                ScannedDocumentPreview preview = ScannedDocumentPreview.builder()
+                        .tempDocId(tempDocId)
+                        .fileName(filename)
+                        .documentType("ATTACH".equalsIgnoreCase(disposition) ? uploadDocType : "OTHER")
+                        .fileSize(actualSize != -1 ? actualSize : sizeBytes)
+                        .sha256(actualSha != null ? actualSha : sha256)
+                        .validationStatus(validationStatus)
+                        .build();
+
+                if ("SKIP_EXACT_DUPLICATE".equalsIgnoreCase(disposition)) {
+                    skippedDuplicatesCount++;
+                } else if ("UNASSIGNED_REVIEW".equalsIgnoreCase(disposition)) {
+                    unassignedList.add(preview);
+                } else if ("ATTACH".equalsIgnoreCase(disposition)) {
+                    appDocPreviews.computeIfAbsent(appId, k -> new ArrayList<>()).add(preview);
                 }
             }
-            for (ScannedDocumentPreview doc : unassignedList) {
-                docIdToSha.put(doc.getTempDocId(), doc.getSha256());
-                docIdToOrigName.put(doc.getTempDocId(), doc.getFileName());
+
+            // 3. Process Applications previews
+            List<ScannedApplicationGroup> appPreviews = new ArrayList<>();
+            for (JsonNode appNode : appsNode) {
+                String appId = optString(appNode, "manifestApplicationId");
+                String company = optString(appNode, "companyName");
+                String title = optString(appNode, "jobTitle");
+                String statusStr = optString(appNode, "status");
+                String priorityStr = optString(appNode, "priority");
+                String dateAppliedStr = optString(appNode, "dateApplied");
+                String stage = optString(appNode, "stage");
+                String source = optString(appNode, "source");
+                String notes = optString(appNode, "notes");
+
+                if (company.isEmpty() || title.isEmpty()) {
+                    continue;
+                }
+
+                // Check duplicates against db records
+                boolean isDuplicate = false;
+                Long existingId = null;
+                Optional<JobApplication> existingApp = jobApplicationRepository.findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId(
+                        company, title, currentUser.getId()
+                );
+                if (existingApp.isPresent()) {
+                    isDuplicate = true;
+                    existingId = existingApp.get().getId();
+                }
+
+                List<ScannedDocumentPreview> docPreviews = appDocPreviews.getOrDefault(appId, Collections.emptyList());
+
+                appPreviews.add(ScannedApplicationGroup.builder()
+                        .tempAppId(UUID.randomUUID().toString())
+                        .companyName(company)
+                        .jobTitle(title)
+                        .dateApplied(dateAppliedStr.isEmpty() ? null : dateAppliedStr)
+                        .status(statusStr)
+                        .priority(priorityStr)
+                        .isDuplicate(isDuplicate)
+                        .existingApplicationId(existingId)
+                        .stage(stage)
+                        .source(source)
+                        .notes(notes)
+                        .documents(docPreviews)
+                        .build());
             }
+
+            // Check if there are any unexpected files in ZIP archives
+            for (String key : laptopFiles.keySet()) {
+                if (!matchedZipPaths.contains(key)) {
+                    hasValidationErrors = true;
+                }
+            }
+            for (String key : driveFiles.keySet()) {
+                if (!matchedZipPaths.contains(key)) {
+                    hasValidationErrors = true;
+                }
+            }
+
+            // 5. Verification Check Rules
+            if (appPreviews.size() != 172) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 172 applications, but parsed " + appPreviews.size());
+            }
+            long rejectedCount = appPreviews.stream().filter(a -> "REJECTED".equalsIgnoreCase(a.getStatus())).count();
+            if (rejectedCount != 57) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 57 REJECTED applications, but found " + rejectedCount);
+            }
+            long noResponseCount = appPreviews.stream().filter(a -> "NO_RESPONSE".equalsIgnoreCase(a.getStatus())).count();
+            if (noResponseCount != 115) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 115 NO_RESPONSE applications, but found " + noResponseCount);
+            }
+            int totalAttachments = appPreviews.stream().mapToInt(a -> a.getDocuments().size()).sum();
+            if (totalAttachments != 235) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 235 attachments, but found " + totalAttachments);
+            }
+            long appsWithFiles = appPreviews.stream().filter(a -> !a.getDocuments().isEmpty()).count();
+            if (appsWithFiles != 85) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 85 applications with attachments, but found " + appsWithFiles);
+            }
+            if (unassignedList.size() != 69) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 69 unassigned unique files, but found " + unassignedList.size());
+            }
+            if (skippedDuplicatesCount != 16) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 16 exact duplicates skipped, but found " + skippedDuplicatesCount);
+            }
+
+            // Persist metadata mappings for confirm lookup
+            Map<String, Object> mappings = new HashMap<>();
+            mappings.put("shaToTempPath", shaToTempPath);
             mappings.put("docIdToSha", docIdToSha);
             mappings.put("docIdToOrigName", docIdToOrigName);
+            mappings.put("hasValidationErrors", hasValidationErrors);
 
             Files.write(tempDir.resolve("mappings.json"), objectMapper.writeValueAsBytes(mappings));
 
-            // Persist the Scanned ImportBatch record in the database
+            // Persist Scanned ImportBatch in database
             ImportBatch batch = ImportBatch.builder()
                     .id(scanId)
                     .user(currentUser)
@@ -289,7 +404,7 @@ public class BulkImportService {
                     .build();
             importBatchRepository.save(batch);
 
-            log.info("Batch scan {} complete. Skipped duplicates count: {}. Unassigned count: {}", scanId, skippedDuplicatesCount, unassignedList.size());
+            log.info("Batch scan {} verified and completed successfully.", scanId);
 
             return BulkScanResponse.builder()
                     .scanId(scanId)
@@ -304,17 +419,20 @@ public class BulkImportService {
         }
     }
 
-    @Transactional
     public BulkConfirmResponse confirm(BulkConfirmRequest request) {
         currentUserService.verifyNotDemo();
         User currentUser = currentUserService.getCurrentUser();
 
-        // 1. Lock/claim import batch atomically matching scanId and userId
+        // Validate confirm payload applications count
+        if (request.getApplications() == null || request.getApplications().isEmpty()) {
+            throw new IllegalArgumentException("Confirmation rejected: Applications list cannot be empty.");
+        }
+
+        // Lock batch atomically
         ImportBatch batch = importBatchRepository.findByIdAndUserIdForUpdate(request.getScanId(), currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Import Batch not found with id: " + request.getScanId()));
 
         if ("PROCESSING".equals(batch.getState()) || "COMPLETED".equals(batch.getState())) {
-            // Idempotent retry fallback success
             return BulkConfirmResponse.builder()
                     .successCount(request.getApplications().size())
                     .failureCount(0)
@@ -322,7 +440,6 @@ public class BulkImportService {
                     .build();
         }
 
-        // Validate double import protection
         Optional<ImportBatch> completed = importBatchRepository.findByUserIdAndManifestHashAndState(
                 currentUser.getId(), batch.getManifestHash(), "COMPLETED"
         );
@@ -341,21 +458,24 @@ public class BulkImportService {
             throw new IllegalStateException("Import mappings config has expired or is missing.");
         }
 
-        List<BulkConfirmResponse.DocumentFailureInfo> docFailures = new ArrayList<>();
         List<String> uploadedStorageKeys = new ArrayList<>();
 
-        int successCount = 0;
-        int failureCount = 0;
-
+        // Read validation errors config
         try {
             JsonNode mappingsNode = objectMapper.readTree(Files.readAllBytes(mappingsPath));
+            boolean hasValidationErrors = mappingsNode.has("hasValidationErrors") && mappingsNode.get("hasValidationErrors").asBoolean();
+            if (hasValidationErrors) {
+                throw new IllegalArgumentException("Import confirmation is disabled due to missing, changed, or unexpected files.");
+            }
+
             Map<String, String> shaToTempPath = objectMapper.convertValue(mappingsNode.get("shaToTempPath"), Map.class);
             Map<String, String> docIdToSha = objectMapper.convertValue(mappingsNode.get("docIdToSha"), Map.class);
             Map<String, String> docIdToOrigName = objectMapper.convertValue(mappingsNode.get("docIdToOrigName"), Map.class);
 
-            for (BulkConfirmApplication appReq : request.getApplications()) {
-                try {
-                    // Match existing applications (generic matching by company + title)
+            // Run database inserts programmatically inside a transaction
+            TransactionStatus txStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
+            try {
+                for (BulkConfirmApplication appReq : request.getApplications()) {
                     Optional<JobApplication> existingAppOpt = jobApplicationRepository.findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId(
                             appReq.getCompanyName(), appReq.getJobTitle(), currentUser.getId()
                     );
@@ -373,26 +493,34 @@ public class BulkImportService {
 
                     LocalDate dateApplied = null;
                     if (appReq.getDateApplied() != null && !appReq.getDateApplied().trim().isEmpty()) {
-                        try {
-                            dateApplied = LocalDate.parse(appReq.getDateApplied());
-                        } catch (Exception ignored) {}
+                        dateApplied = LocalDate.parse(appReq.getDateApplied());
                     }
 
-                    LocalDate followUpDate = null;
-                    LocalDate deadlineDate = null;
-
-                    // Reconcile or Create Application
                     if (existingAppOpt.isPresent()) {
                         application = existingAppOpt.get();
+                        ApplicationStatus oldStatus = application.getStatus();
                         application.setStatus(newStatus);
                         application.setPriority(newPriority);
                         application.setDateApplied(dateApplied);
-                        // Terminal date cleanups
+                        application.setStage(appReq.getStage());
+                        application.setSource(appReq.getSource());
+                        application.setNotes(appReq.getNotes());
                         if (newStatus == ApplicationStatus.REJECTED || newStatus == ApplicationStatus.WITHDRAWN || newStatus == ApplicationStatus.NO_RESPONSE) {
                             application.setFollowUpDate(null);
                             application.setDeadlineDate(null);
                         }
                         application = jobApplicationRepository.save(application);
+
+                        if (oldStatus != newStatus) {
+                            StatusHistory history = StatusHistory.builder()
+                                    .jobApplication(application)
+                                    .fromStatus(oldStatus)
+                                    .toStatus(newStatus)
+                                    .changedAt(LocalDateTime.now())
+                                    .note("Status changed from " + oldStatus + " to " + newStatus + " via bulk import")
+                                    .build();
+                            statusHistoryRepository.save(history);
+                        }
                     } else {
                         application = JobApplication.builder()
                                 .user(currentUser)
@@ -401,9 +529,14 @@ public class BulkImportService {
                                 .status(newStatus)
                                 .priority(newPriority)
                                 .dateApplied(dateApplied)
-                                .followUpDate(followUpDate)
-                                .deadlineDate(deadlineDate)
+                                .stage(appReq.getStage())
+                                .source(appReq.getSource())
+                                .notes(appReq.getNotes())
                                 .build();
+                        if (newStatus == ApplicationStatus.REJECTED || newStatus == ApplicationStatus.WITHDRAWN || newStatus == ApplicationStatus.NO_RESPONSE) {
+                            application.setFollowUpDate(null);
+                            application.setDeadlineDate(null);
+                        }
                         application = jobApplicationRepository.save(application);
 
                         StatusHistory history = StatusHistory.builder()
@@ -413,12 +546,11 @@ public class BulkImportService {
                                 .changedAt(LocalDateTime.now())
                                 .note("Bulk imported application")
                                 .build();
-                        jobApplicationRepository.flush();
+                        statusHistoryRepository.save(history);
                     }
 
                     // Attach documents
                     if (appReq.getDocuments() != null) {
-                        // Classify documents: exactly one primary CV and one primary COVER_LETTER
                         boolean cvAssigned = false;
                         boolean clAssigned = false;
 
@@ -428,87 +560,63 @@ public class BulkImportService {
                             String tempFilePathStr = shaToTempPath.get(sha);
 
                             if (tempFilePathStr == null) {
-                                docFailures.add(BulkConfirmResponse.DocumentFailureInfo.builder()
-                                        .fileName(origName != null ? origName : "Unknown")
-                                        .error("Extracted temporary document file not found.")
-                                        .build());
-                                continue;
+                                throw new IllegalArgumentException("Extracted temporary document file not found: " + origName);
                             }
 
                             Path tempFile = Paths.get(tempFilePathStr);
                             if (!Files.exists(tempFile)) {
-                                docFailures.add(BulkConfirmResponse.DocumentFailureInfo.builder()
-                                        .fileName(origName)
-                                        .error("Temporary file missing on filesystem.")
-                                        .build());
-                                continue;
+                                throw new FileNotFoundException("Temporary file missing: " + origName);
                             }
 
+                            byte[] fileBytes = Files.readAllBytes(tempFile);
+                            String contentType = "application/octet-stream";
+                            if (origName.toLowerCase().endsWith(".pdf")) {
+                                contentType = "application/pdf";
+                            } else if (origName.toLowerCase().endsWith(".docx")) {
+                                contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                            }
+
+                            CustomMultipartFile multipart = new CustomMultipartFile(fileBytes, "file", origName, contentType);
+
+                            DocumentType targetType = DocumentType.OTHER;
                             try {
-                                byte[] fileBytes = Files.readAllBytes(tempFile);
-                                String contentType = "application/octet-stream";
-                                if (origName.toLowerCase().endsWith(".pdf")) {
-                                    contentType = "application/pdf";
-                                } else if (origName.toLowerCase().endsWith(".docx")) {
-                                    contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-                                }
+                                targetType = DocumentType.valueOf(docConfirm.getDocumentType().toUpperCase());
+                            } catch (Exception ignored) {}
 
-                                CustomMultipartFile multipart = new CustomMultipartFile(fileBytes, "file", origName, contentType);
-
-                                DocumentType targetType = DocumentType.OTHER;
-                                try {
-                                    targetType = DocumentType.valueOf(docConfirm.getDocumentType().toUpperCase());
-                                } catch (Exception ignored) {}
-
-                                // Reclassify logic: one primary CV and COVER_LETTER, extra become OTHER
-                                if (targetType == DocumentType.CV) {
-                                    if (cvAssigned) {
-                                        targetType = DocumentType.OTHER;
-                                    } else {
-                                        cvAssigned = true;
-                                    }
-                                } else if (targetType == DocumentType.COVER_LETTER) {
-                                    if (clAssigned) {
-                                        targetType = DocumentType.OTHER;
-                                    } else {
-                                        clAssigned = true;
-                                    }
-                                }
-
-                                // Upload and store document
-                                ApplicationDocumentResponse stored = documentService.storeDocument(application.getId(), multipart, targetType);
-                                // Read filePath reference key from DB to track for rolls compensation
-                                ApplicationDocument savedDoc = documentRepository.findById(stored.getId()).orElseThrow();
-                                uploadedStorageKeys.add(savedDoc.getFilePath());
-
-                            } catch (Exception docEx) {
-                                log.error("Failed uploading document: " + origName, docEx);
-                                docFailures.add(BulkConfirmResponse.DocumentFailureInfo.builder()
-                                        .fileName(origName)
-                                        .error(docEx.getMessage())
-                                        .build());
+                            if (targetType == DocumentType.CV) {
+                                if (cvAssigned) targetType = DocumentType.OTHER;
+                                else cvAssigned = true;
+                            } else if (targetType == DocumentType.COVER_LETTER) {
+                                if (clAssigned) targetType = DocumentType.OTHER;
+                                else clAssigned = true;
                             }
+
+                            ApplicationDocumentResponse stored = documentService.storeDocument(application.getId(), multipart, targetType);
+                            ApplicationDocument savedDoc = documentRepository.findById(stored.getId()).orElseThrow();
+                            uploadedStorageKeys.add(savedDoc.getFilePath());
                         }
                     }
-                    successCount++;
-                } catch (Exception appEx) {
-                    log.error("Failed importing application: " + appReq.getCompanyName(), appEx);
-                    failureCount++;
                 }
+
+                transactionManager.commit(txStatus);
+
+            } catch (Exception ex) {
+                transactionManager.rollback(txStatus);
+                throw ex;
             }
 
-            // Clean up mappings config file and unique temporary scan files
+            // Cleanup scan assets on successful confirmation
             cleanupTempDir(tempDir);
 
             batch.setState("COMPLETED");
-            batch.setResultSummary(String.format("Imported %d applications. Failures: %d. Documents uploaded: %d.",
-                    successCount, failureCount, uploadedStorageKeys.size()));
+            batch.setResultSummary(String.format("Imported %d applications. Documents uploaded: %d.",
+                    request.getApplications().size(), uploadedStorageKeys.size()));
             importBatchRepository.save(batch);
 
             return BulkConfirmResponse.builder()
-                    .successCount(successCount)
-                    .failureCount(failureCount)
-                    .documentFailures(docFailures)
+                    .successCount(request.getApplications().size())
+                    .failureCount(0)
+                    .documentFailures(new ArrayList<>())
                     .build();
 
         } catch (Exception ex) {
@@ -521,14 +629,24 @@ public class BulkImportService {
                     log.error("Compensation failed to delete key: " + key, storageEx);
                 }
             }
-            batch.setState("FAILED");
-            importBatchRepository.save(batch);
+
+            // Mark batch as FAILED in database (separate transaction)
+            TransactionStatus failTxStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
+            try {
+                ImportBatch dbBatch = importBatchRepository.findById(batch.getId()).orElse(batch);
+                dbBatch.setState("FAILED");
+                importBatchRepository.save(dbBatch);
+                transactionManager.commit(failTxStatus);
+            } catch (Exception dbEx) {
+                transactionManager.rollback(failTxStatus);
+            }
+
             throw new RuntimeException("Import confirmation failed: " + ex.getMessage(), ex);
         }
     }
 
-    // 2-hour scheduled cleanup for abandoned scans
-    @Scheduled(fixedRate = 600000) // Runs every 10 minutes
+    @Scheduled(fixedRate = 600000)
+    @Transactional
     public void cleanupExpiredScans() {
         LocalDateTime cutoff = LocalDateTime.now();
         List<ImportBatch> expiredBatches = importBatchRepository.findAll().stream()
@@ -572,6 +690,16 @@ public class BulkImportService {
         } catch (Exception e) {
             throw new RuntimeException("SHA-256 digest failed", e);
         }
+    }
+
+    private String normalizePath(String path) {
+        if (path == null) {
+            return "";
+        }
+        return path.replace("\\", "/")
+                .replaceAll("^/+", "")
+                .replaceAll("/+$", "")
+                .replaceAll("/+", "/");
     }
 
     private String optString(JsonNode node, String... keys) {

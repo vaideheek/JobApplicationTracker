@@ -99,6 +99,9 @@ export default function BulkImport() {
           status: edits.status || app.status,
           priority: edits.priority || app.priority,
           dateApplied: edits.dateApplied || app.dateApplied,
+          stage: app.stage,
+          source: app.source,
+          notes: app.notes,
           documents: docs,
         });
       }
@@ -123,6 +126,9 @@ export default function BulkImport() {
                 status: edits.status || scannedApp.status,
                 priority: edits.priority || scannedApp.priority,
                 dateApplied: edits.dateApplied || scannedApp.dateApplied,
+                stage: scannedApp.stage,
+                source: scannedApp.source,
+                notes: scannedApp.notes,
                 documents: [],
               };
               applicationsPayload.push(targetApp);

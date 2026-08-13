@@ -14,5 +14,8 @@ public class BulkConfirmApplication {
     private String status;
     private String priority;
     private String dateApplied;
+    private String stage;
+    private String source;
+    private String notes;
     private List<BulkConfirmDocument> documents;
 }
