@@ -202,6 +202,9 @@ export interface ScannedApplicationGroup {
   priority: string;
   isDuplicate: boolean;
   existingApplicationId: number | null;
+  stage: string | null;
+  source: string | null;
+  notes: string | null;
   documents: ScannedDocumentPreview[];
 }
 
@@ -209,6 +212,8 @@ export interface BulkScanResponse {
   scanId: string;
   applications: ScannedApplicationGroup[];
   unassignedFiles: ScannedDocumentPreview[];
+  canConfirm: boolean;
+  validationIssues: string[];
 }
 
 export interface BulkConfirmDocument {
@@ -223,6 +228,9 @@ export interface BulkConfirmApplication {
   status: string;
   priority: string;
   dateApplied: string | null;
+  stage: string | null;
+  source: string | null;
+  notes: string | null;
   documents: BulkConfirmDocument[];
 }
 

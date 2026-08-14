@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
@@ -99,10 +101,23 @@ public class ApplicationDocumentService {
         // Delete the old file from storage since new DB record is successfully saved
         if (existing.isPresent()) {
             ApplicationDocument oldDoc = existing.get();
-            try {
-                storageService.delete(oldDoc.getFilePath());
-            } catch (IOException e) {
-                log.error("Failed to delete replaced document from storage: " + oldDoc.getFilePath(), e);
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        try {
+                            storageService.delete(oldDoc.getFilePath());
+                        } catch (IOException e) {
+                            log.error("Failed to delete replaced document from storage after commit: " + oldDoc.getFilePath(), e);
+                        }
+                    }
+                });
+            } else {
+                try {
+                    storageService.delete(oldDoc.getFilePath());
+                } catch (IOException e) {
+                    log.error("Failed to delete replaced document from storage: " + oldDoc.getFilePath(), e);
+                }
             }
         }
 

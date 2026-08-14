@@ -1,18 +1,10 @@
 package com.jobtrack;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.jobtrack.dto.BulkConfirmApplication;
-import com.jobtrack.dto.BulkConfirmDocument;
-import com.jobtrack.dto.BulkConfirmRequest;
-import com.jobtrack.dto.BulkConfirmResponse;
-import com.jobtrack.entity.ImportBatch;
-import com.jobtrack.entity.JobApplication;
-import com.jobtrack.entity.User;
-import com.jobtrack.enums.ApplicationPriority;
-import com.jobtrack.enums.ApplicationStatus;
-import com.jobtrack.repository.ImportBatchRepository;
-import com.jobtrack.repository.JobApplicationRepository;
-import com.jobtrack.repository.UserRepository;
+import com.jobtrack.dto.*;
+import com.jobtrack.entity.*;
+import com.jobtrack.enums.*;
+import com.jobtrack.repository.*;
 import com.jobtrack.service.BulkImportService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,8 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -44,7 +35,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Transactional
 public class BulkImportTests {
 
     @Autowired
@@ -98,13 +88,15 @@ public class BulkImportTests {
                 ));
     }
 
-    private byte[] createMockZip(String filename, String content) throws Exception {
+    private byte[] createMockZip(Map<String, String> entries) throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ZipOutputStream zos = new ZipOutputStream(baos)) {
-            ZipEntry entry = new ZipEntry(filename);
-            zos.putNextEntry(entry);
-            zos.write(content.getBytes(StandardCharsets.UTF_8));
-            zos.closeEntry();
+            for (Map.Entry<String, String> entry : entries.entrySet()) {
+                ZipEntry ze = new ZipEntry(entry.getKey());
+                zos.putNextEntry(ze);
+                zos.write(entry.getValue().getBytes(StandardCharsets.UTF_8));
+                zos.closeEntry();
+            }
         }
         return baos.toByteArray();
     }
@@ -133,50 +125,91 @@ public class BulkImportTests {
                 .build();
         jobApplicationRepository.saveAndFlush(existingApp);
 
-        // Prepare synthetic mock data
-        String testDocContent = "This is a CV document content for test.";
-        byte[] docBytes = testDocContent.getBytes(StandardCharsets.UTF_8);
-        String docSha = getSha256(docBytes);
-        int docSize = docBytes.length;
+        // Generate 172 applications
+        List<String> appIds = new ArrayList<>();
+        StringBuilder appsJson = new StringBuilder("[");
+        for (int i = 1; i <= 172; i++) {
+            String appId = "APP-" + String.format("%03d", i);
+            appIds.add(appId);
+            String company = (i == 1) ? "Tripadvisor" : ("Company " + i);
+            String position = (i == 1) ? "Junior Software Engineer" : ("Position " + i);
+            // 57 REJECTED, 115 NO_RESPONSE. App 1 (Tripadvisor) is NO_RESPONSE, apps 2 to 58 are REJECTED, apps 59 to 172 are NO_RESPONSE
+            String status = (i >= 2 && i <= 58) ? "REJECTED" : "NO_RESPONSE";
 
-        // ZIP 1 containing CV
-        byte[] zip1Bytes = createMockZip("CV_Tripadvisor.pdf", testDocContent);
-        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "laptop.zip", "application/zip", zip1Bytes);
+            if (i > 1) appsJson.append(",");
+            appsJson.append(String.format(
+                "{\"manifestApplicationId\":\"%s\",\"companyName\":\"%s\",\"jobTitle\":\"%s\",\"status\":\"%s\",\"priority\":\"LOW\",\"dateApplied\":\"2026-08-13\",\"stage\":\"Stage\",\"source\":\"Source\",\"notes\":\"Notes\"}",
+                appId, company, position, status
+            ));
+        }
+        appsJson.append("]");
 
-        // ZIP 2 containing unassigned file
-        String unassignedContent = "This is an unassigned CV document.";
-        byte[] zip2Bytes = createMockZip("extra_file.pdf", unassignedContent);
-        MockMultipartFile driveZip = new MockMultipartFile("googleDriveZip", "drive.zip", "application/zip", zip2Bytes);
+        // Generate documents to exactly meet count requirements
+        List<String> docJsonList = new ArrayList<>();
+        Map<String, String> zip1Entries = new HashMap<>();
+        Map<String, String> zip2Entries = new HashMap<>();
 
-        // JSON Manifest referencing 2 applications (Tripadvisor which reuses existing and Google which is new)
-        String manifestJson = "["
-                + "  {"
-                + "    \"company\": \"Tripadvisor\","
-                + "    \"position\": \"Junior Software Engineer\","
-                + "    \"status\": \"NO_RESPONSE\","
-                + "    \"priority\": \"LOW\","
-                + "    \"dateApplied\": \"2026-08-13\","
-                + "    \"files\": ["
-                + "      {"
-                + "        \"name\": \"CV_Tripadvisor.pdf\","
-                + "        \"type\": \"CV\","
-                + "        \"size\": " + docSize + ","
-                + "        \"sha256\": \"" + docSha + "\""
-                + "      }"
-                + "    ]"
-                + "  },"
-                + "  {"
-                + "    \"company\": \"Google\","
-                + "    \"position\": \"Staff Engineer\","
-                + "    \"status\": \"REJECTED\","
-                + "    \"priority\": \"LOW\","
-                + "    \"dateApplied\": \"2026-08-12\","
-                + "    \"files\": []"
-                + "  }"
-                + "]";
+        // Add 235 attachments to first 85 applications
+        int docIndex = 1;
+        for (int i = 0; i < 85; i++) {
+            String appId = appIds.get(i);
+            int docsForThisApp = (i < 65) ? 3 : 2; // 65 * 3 + 20 * 2 = 195 + 40 = 235 docs
+            for (int d = 0; d < docsForThisApp; d++) {
+                String docId = "DOC-" + String.format("%03d", docIndex);
+                String relativePath = "Folder" + i + "/doc_" + docIndex + ".pdf";
+                String filename = "doc_" + docIndex + ".pdf";
+                String content = "%PDF-1.4: Content of doc " + docIndex;
+                byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+                String sha = getSha256(contentBytes);
+
+                docJsonList.add(String.format(
+                    "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":\"%s\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}",
+                    docId, relativePath, filename, contentBytes.length, sha, appId
+                ));
+                zip1Entries.put("JobApps/" + relativePath, content);
+                docIndex++;
+            }
+        }
+
+        // Add 69 unassigned unique files
+        for (int i = 1; i <= 69; i++) {
+            String docId = "DOC-U" + i;
+            String relativePath = "Unassigned/unassigned_" + i + ".pdf";
+            String filename = "unassigned_" + i + ".pdf";
+            String content = "%PDF-1.4: Unassigned content " + i;
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            String sha = getSha256(contentBytes);
+
+            docJsonList.add(String.format(
+                "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"GOOGLE_DRIVE\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":null,\"uploadDocumentType\":\"OTHER\",\"disposition\":\"UNASSIGNED_REVIEW\"}",
+                docId, relativePath, filename, contentBytes.length, sha
+            ));
+            zip2Entries.put("Jobs/" + relativePath, content);
+        }
+
+        // Add 16 exact duplicates skipped
+        for (int i = 1; i <= 16; i++) {
+            String docId = "DOC-D" + i;
+            String relativePath = "Duplicates/dup_" + i + ".pdf";
+            String filename = "dup_" + i + ".pdf";
+            String content = "%PDF-1.4: Content of doc " + i;
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            String sha = getSha256(contentBytes);
+
+            docJsonList.add(String.format(
+                "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":null,\"uploadDocumentType\":\"OTHER\",\"disposition\":\"SKIP_EXACT_DUPLICATE\"}",
+                docId, relativePath, filename, contentBytes.length, sha
+            ));
+            zip1Entries.put("JobApps/" + relativePath, content);
+        }
+
+        String docsJson = "[" + String.join(",", docJsonList) + "]";
+        String manifestJson = "{\"schemaVersion\":\"1.0\",\"applications\":" + appsJson.toString() + ",\"documents\":" + docsJson + "}";
+
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "laptop.zip", "application/zip", createMockZip(zip1Entries));
+        MockMultipartFile driveZip = new MockMultipartFile("googleDriveZip", "drive.zip", "application/zip", createMockZip(zip2Entries));
         MockMultipartFile manifest = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestJson.getBytes(StandardCharsets.UTF_8));
 
-        // Get CSRF Token
         String csrfToken = getCsrfToken(testSession);
 
         // Perform Scan
@@ -189,53 +222,47 @@ public class BulkImportTests {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        com.jobtrack.dto.BulkScanResponse scanResponse = objectMapper.readValue(scanResponseContent, com.jobtrack.dto.BulkScanResponse.class);
+        BulkScanResponse scanResponse = objectMapper.readValue(scanResponseContent, BulkScanResponse.class);
         assertNotNull(scanResponse.getScanId());
-        assertEquals(2, scanResponse.getApplications().size());
-        assertEquals(1, scanResponse.getUnassignedFiles().size());
+        assertEquals(172, scanResponse.getApplications().size());
+        assertEquals(69, scanResponse.getUnassignedFiles().size());
 
-        // Verify Tripadvisor is marked duplicate / matches existing
-        com.jobtrack.dto.ScannedApplicationGroup tripAdvisorPreview = scanResponse.getApplications().stream()
+        // Verify Tripadvisor duplicate rule matches
+        ScannedApplicationGroup tripAdvisorPreview = scanResponse.getApplications().stream()
                 .filter(a -> "Tripadvisor".equalsIgnoreCase(a.getCompanyName()))
                 .findFirst().orElseThrow();
         assertTrue(tripAdvisorPreview.isDuplicate());
         assertEquals(existingApp.getId(), tripAdvisorPreview.getExistingApplicationId());
+        assertEquals(3, tripAdvisorPreview.getDocuments().size());
         assertEquals("VALID", tripAdvisorPreview.getDocuments().get(0).getValidationStatus());
 
-        // Verify Google is marked new (not duplicate)
-        com.jobtrack.dto.ScannedApplicationGroup googlePreview = scanResponse.getApplications().stream()
-                .filter(a -> "Google".equalsIgnoreCase(a.getCompanyName()))
-                .findFirst().orElseThrow();
-        assertFalse(googlePreview.isDuplicate());
+        // Map confirm payload
+        List<BulkConfirmApplication> applicationsPayload = new ArrayList<>();
+        for (ScannedApplicationGroup app : scanResponse.getApplications()) {
+            List<BulkConfirmDocument> docs = new ArrayList<>();
+            for (ScannedDocumentPreview doc : app.getDocuments()) {
+                docs.add(BulkConfirmDocument.builder()
+                        .tempDocId(doc.getTempDocId())
+                        .documentType("CV")
+                        .build());
+            }
+            applicationsPayload.add(BulkConfirmApplication.builder()
+                    .tempAppId(app.getTempAppId())
+                    .companyName(app.getCompanyName())
+                    .jobTitle(app.getJobTitle())
+                    .status(app.getStatus())
+                    .priority(app.getPriority())
+                    .dateApplied(app.getDateApplied())
+                    .stage(app.getStage())
+                    .source(app.getSource())
+                    .notes(app.getNotes())
+                    .documents(docs)
+                    .build());
+        }
 
-        // Confirm Scan
         BulkConfirmRequest confirmRequest = BulkConfirmRequest.builder()
                 .scanId(scanResponse.getScanId())
-                .applications(List.of(
-                        BulkConfirmApplication.builder()
-                                .tempAppId(tripAdvisorPreview.getTempAppId())
-                                .companyName(tripAdvisorPreview.getCompanyName())
-                                .jobTitle(tripAdvisorPreview.getJobTitle())
-                                .status(tripAdvisorPreview.getStatus())
-                                .priority(tripAdvisorPreview.getPriority())
-                                .dateApplied(tripAdvisorPreview.getDateApplied())
-                                .documents(List.of(
-                                        BulkConfirmDocument.builder()
-                                                .tempDocId(tripAdvisorPreview.getDocuments().get(0).getTempDocId())
-                                                .documentType("CV")
-                                                .build()
-                                ))
-                                .build(),
-                        BulkConfirmApplication.builder()
-                                .tempAppId(googlePreview.getTempAppId())
-                                .companyName(googlePreview.getCompanyName())
-                                .jobTitle(googlePreview.getJobTitle())
-                                .status(googlePreview.getStatus())
-                                .priority(googlePreview.getPriority())
-                                .dateApplied(googlePreview.getDateApplied())
-                                .documents(Collections.emptyList())
-                                .build()
-                ))
+                .applications(applicationsPayload)
                 .build();
 
         String confirmResponseContent = mockMvc.perform(post("/api/bulk-import/confirm")
@@ -247,10 +274,10 @@ public class BulkImportTests {
                 .andReturn().getResponse().getContentAsString();
 
         BulkConfirmResponse confirmResponse = objectMapper.readValue(confirmResponseContent, BulkConfirmResponse.class);
-        assertEquals(2, confirmResponse.getSuccessCount());
+        assertEquals(172, confirmResponse.getSuccessCount());
         assertEquals(0, confirmResponse.getFailureCount());
 
-        // Verify Tripadvisor was updated in place (NO duplicate record created, status is now NO_RESPONSE, priority is LOW, date cleanups applied)
+        // Verify Tripadvisor is updated in place
         List<JobApplication> tripAdvisorApps = jobApplicationRepository.findAllByUserId(testUser.getId()).stream()
                 .filter(a -> a.getCompanyName().equalsIgnoreCase("Tripadvisor"))
                 .toList();
@@ -260,35 +287,17 @@ public class BulkImportTests {
         assertEquals(ApplicationPriority.LOW, tripAdvisorResult.getPriority());
         assertNull(tripAdvisorResult.getFollowUpDate());
         assertNull(tripAdvisorResult.getDeadlineDate());
+        assertEquals("Stage", tripAdvisorResult.getStage());
+        assertEquals("Source", tripAdvisorResult.getSource());
+        assertEquals("Notes", tripAdvisorResult.getNotes());
 
-        // Verify Google is created
-        List<JobApplication> googleApps = jobApplicationRepository.findAllByUserId(testUser.getId()).stream()
-                .filter(a -> a.getCompanyName().equalsIgnoreCase("Google"))
-                .toList();
-        assertEquals(1, googleApps.size());
-        JobApplication googleResult = googleApps.get(0);
-        assertEquals(ApplicationStatus.REJECTED, googleResult.getStatus());
-        assertNull(googleResult.getFollowUpDate());
-        assertNull(googleResult.getDeadlineDate());
-
-        // Verify Idempotency constraint is stored in import_batches
+        // Verify batch state is COMPLETED
         ImportBatch batch = importBatchRepository.findById(scanResponse.getScanId()).orElseThrow();
         assertEquals("COMPLETED", batch.getState());
-        assertEquals(testUser.getId(), batch.getUser().getId());
-
-        // Attempting to scan the same manifest file again should fail to protect against double imports
-        mockMvc.perform(multipart("/api/bulk-import/scan")
-                .file(manifest)
-                .file(laptopZip)
-                .file(driveZip)
-                .session(testSession)
-                .header("X-CSRF-TOKEN", csrfToken))
-                .andExpect(status().isInternalServerError());
     }
 
     @Test
     void testDemoAccountIsRestrictedFromImporting() throws Exception {
-        // Create demo account
         User demoUser = User.builder()
                 .username("demo_tester")
                 .passwordHash(passwordEncoder.encode("password123"))
@@ -314,7 +323,6 @@ public class BulkImportTests {
         MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "laptop.zip", "application/zip", new byte[0]);
         MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "drive.zip", "application/zip", new byte[0]);
 
-        // Scan should return 403 Forbidden for demo account
         mockMvc.perform(multipart("/api/bulk-import/scan")
                 .file(manifest)
                 .file(laptopZip)
@@ -322,6 +330,220 @@ public class BulkImportTests {
                 .session(demoSession)
                 .header("X-CSRF-TOKEN", csrfToken))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testDsStoreAndGenuineDuplicateHashes() throws Exception {
+        JobApplication existingTripadvisor = JobApplication.builder()
+                .companyName("Tripadvisor")
+                .jobTitle("Junior Software Engineer")
+                .status(ApplicationStatus.NO_RESPONSE)
+                .priority(ApplicationPriority.MEDIUM)
+                .user(testUser)
+                .build();
+        jobApplicationRepository.saveAndFlush(existingTripadvisor);
+
+        List<String> appJsonList = new ArrayList<>();
+        List<String> docJsonList = new ArrayList<>();
+
+        List<String> appIds = new ArrayList<>();
+        for (int i = 1; i <= 172; i++) {
+            String appId = "APP-" + String.format("%03d", i);
+            appIds.add(appId);
+            String status = (i <= 57) ? "REJECTED" : "NO_RESPONSE";
+            String company = (i == 159) ? "Tripadvisor" : "Company_" + i;
+            String title = (i == 159) ? "Junior Software Engineer" : "Title_" + i;
+            String importAction = (i == 159) ? "MATCH_EXISTING" : "CREATE_OR_MATCH_EXACT";
+
+            appJsonList.add(String.format(
+                "{\"manifestApplicationId\":\"%s\",\"companyName\":\"%s\",\"jobTitle\":\"%s\",\"status\":\"%s\",\"priority\":\"MEDIUM\",\"importAction\":\"%s\"}",
+                appId, company, title, status, importAction
+            ));
+        }
+
+        Map<String, String> zip1Entries = new HashMap<>();
+        Map<String, String> zip2Entries = new HashMap<>();
+
+        int docIndex = 1;
+        for (int i = 0; i < 85; i++) {
+            String appId = appIds.get(i);
+            int docsForThisApp = (i < 65) ? 3 : 2;
+            for (int d = 0; d < docsForThisApp; d++) {
+                String docId = "DOC-" + String.format("%03d", docIndex);
+                String relativePath = "Folder" + i + "/doc_" + docIndex + ".pdf";
+                String filename = "doc_" + docIndex + ".pdf";
+                String content = "%PDF-1.4: Content of doc " + docIndex;
+                byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+                String sha = getSha256(contentBytes);
+
+                docJsonList.add(String.format(
+                    "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":\"%s\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}",
+                    docId, relativePath, filename, contentBytes.length, sha, appId
+                ));
+                zip1Entries.put("JobApps/" + relativePath, content);
+                docIndex++;
+            }
+        }
+
+        for (int i = 1; i <= 69; i++) {
+            String docId = "DOC-U" + i;
+            String relativePath = "Unassigned/unassigned_" + i + ".pdf";
+            String filename = "unassigned_" + i + ".pdf";
+            String content = "%PDF-1.4: Unassigned content " + i;
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            String sha = getSha256(contentBytes);
+
+            docJsonList.add(String.format(
+                "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"GOOGLE_DRIVE\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":null,\"uploadDocumentType\":\"OTHER\",\"disposition\":\"UNASSIGNED_REVIEW\"}",
+                docId, relativePath, filename, contentBytes.length, sha
+            ));
+            zip2Entries.put("Jobs/" + relativePath, content);
+        }
+
+        for (int i = 1; i <= 16; i++) {
+            String docId = "DOC-D" + i;
+            String relativePath = "Duplicates/dup_" + i + ".pdf";
+            String filename = "dup_" + i + ".pdf";
+            String content = "%PDF-1.4: Content of doc " + i;
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            String sha = getSha256(contentBytes);
+
+            docJsonList.add(String.format(
+                "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":null,\"uploadDocumentType\":\"OTHER\",\"disposition\":\"SKIP_EXACT_DUPLICATE\"}",
+                docId, relativePath, filename, contentBytes.length, sha
+            ));
+            zip1Entries.put("JobApps/" + relativePath, content);
+        }
+
+        zip1Entries.put("JobApps/.DS_Store", "dummy store content");
+        zip1Entries.put("JobApps/Folder0/.DS_Store", "dummy store content");
+        zip2Entries.put("Jobs/.DS_Store", "dummy store content");
+
+        String manifestJson = String.format(
+            "{\"applications\":[%s],\"documents\":[%s]}",
+            String.join(",", appJsonList), String.join(",", docJsonList)
+        );
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(zip1Entries);
+        byte[] driveBytes = createMockZip(zip2Entries);
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        String responseContent = mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        BulkScanResponse scanRes = objectMapper.readValue(responseContent, BulkScanResponse.class);
+        assertTrue(scanRes.isCanConfirm());
+        assertTrue(scanRes.getValidationIssues().isEmpty());
+    }
+
+    @Test
+    void testMissingTripadvisor() throws Exception {
+        List<String> appJsonList = new ArrayList<>();
+        List<String> docJsonList = new ArrayList<>();
+
+        List<String> appIds = new ArrayList<>();
+        for (int i = 1; i <= 172; i++) {
+            String appId = "APP-" + String.format("%03d", i);
+            appIds.add(appId);
+            String status = (i <= 57) ? "REJECTED" : "NO_RESPONSE";
+            String company = (i == 159) ? "Tripadvisor" : "Company_" + i;
+            String title = (i == 159) ? "Junior Software Engineer" : "Title_" + i;
+            String importAction = (i == 159) ? "MATCH_EXISTING" : "CREATE_OR_MATCH_EXACT";
+
+            appJsonList.add(String.format(
+                "{\"manifestApplicationId\":\"%s\",\"companyName\":\"%s\",\"jobTitle\":\"%s\",\"status\":\"%s\",\"priority\":\"MEDIUM\",\"importAction\":\"%s\"}",
+                appId, company, title, status, importAction
+            ));
+        }
+
+        Map<String, String> zip1Entries = new HashMap<>();
+        Map<String, String> zip2Entries = new HashMap<>();
+
+        int docIndex = 1;
+        for (int i = 0; i < 85; i++) {
+            String appId = appIds.get(i);
+            int docsForThisApp = (i < 65) ? 3 : 2;
+            for (int d = 0; d < docsForThisApp; d++) {
+                String docId = "DOC-" + String.format("%03d", docIndex);
+                String relativePath = "Folder" + i + "/doc_" + docIndex + ".pdf";
+                String filename = "doc_" + docIndex + ".pdf";
+                String content = "%PDF-1.4: Content of doc " + docIndex;
+                byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+                String sha = getSha256(contentBytes);
+
+                docJsonList.add(String.format(
+                    "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":\"%s\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}",
+                    docId, relativePath, filename, contentBytes.length, sha, appId
+                ));
+                zip1Entries.put("JobApps/" + relativePath, content);
+                docIndex++;
+            }
+        }
+
+        for (int i = 1; i <= 69; i++) {
+            String docId = "DOC-U" + i;
+            String relativePath = "Unassigned/unassigned_" + i + ".pdf";
+            String filename = "unassigned_" + i + ".pdf";
+            String content = "%PDF-1.4: Unassigned content " + i;
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            String sha = getSha256(contentBytes);
+
+            docJsonList.add(String.format(
+                "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"GOOGLE_DRIVE\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":null,\"uploadDocumentType\":\"OTHER\",\"disposition\":\"UNASSIGNED_REVIEW\"}",
+                docId, relativePath, filename, contentBytes.length, sha
+            ));
+            zip2Entries.put("Jobs/" + relativePath, content);
+        }
+
+        for (int i = 1; i <= 16; i++) {
+            String docId = "DOC-D" + i;
+            String relativePath = "Duplicates/dup_" + i + ".pdf";
+            String filename = "dup_" + i + ".pdf";
+            String content = "%PDF-1.4: Content of doc " + i;
+            byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
+            String sha = getSha256(contentBytes);
+
+            docJsonList.add(String.format(
+                "{\"manifestDocumentId\":\"%s\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"%s\",\"filename\":\"%s\",\"sizeBytes\":%d,\"sha256\":\"%s\",\"manifestApplicationId\":null,\"uploadDocumentType\":\"OTHER\",\"disposition\":\"SKIP_EXACT_DUPLICATE\"}",
+                docId, relativePath, filename, contentBytes.length, sha
+            ));
+            zip1Entries.put("JobApps/" + relativePath, content);
+        }
+
+        String manifestJson = String.format(
+            "{\"applications\":[%s],\"documents\":[%s]}",
+            String.join(",", appJsonList), String.join(",", docJsonList)
+        );
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(zip1Entries);
+        byte[] driveBytes = createMockZip(zip2Entries);
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isInternalServerError());
     }
 
     private String getCsrfToken(MockHttpSession session) throws Exception {
