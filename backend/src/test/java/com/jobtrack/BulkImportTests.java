@@ -192,7 +192,7 @@ public class BulkImportTests {
             String docId = "DOC-D" + i;
             String relativePath = "Duplicates/dup_" + i + ".pdf";
             String filename = "dup_" + i + ".pdf";
-            String content = "%PDF-1.4: Duplicate content " + i;
+            String content = "%PDF-1.4: Content of doc " + i;
             byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
             String sha = getSha256(contentBytes);
 
@@ -389,7 +389,7 @@ public class BulkImportTests {
             String docId = "DOC-U" + i;
             String relativePath = "Unassigned/unassigned_" + i + ".pdf";
             String filename = "unassigned_" + i + ".pdf";
-            String content = "%PDF-1.4: Unassigned content " + (i % 2 == 0 ? "duplicate" : i);
+            String content = "%PDF-1.4: Unassigned content " + i;
             byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
             String sha = getSha256(contentBytes);
 
@@ -404,7 +404,7 @@ public class BulkImportTests {
             String docId = "DOC-D" + i;
             String relativePath = "Duplicates/dup_" + i + ".pdf";
             String filename = "dup_" + i + ".pdf";
-            String content = "%PDF-1.4: Duplicate content " + i;
+            String content = "%PDF-1.4: Content of doc " + i;
             byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
             String sha = getSha256(contentBytes);
 
@@ -511,7 +511,7 @@ public class BulkImportTests {
             String docId = "DOC-D" + i;
             String relativePath = "Duplicates/dup_" + i + ".pdf";
             String filename = "dup_" + i + ".pdf";
-            String content = "%PDF-1.4: Duplicate content " + i;
+            String content = "%PDF-1.4: Content of doc " + i;
             byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
             String sha = getSha256(contentBytes);
 

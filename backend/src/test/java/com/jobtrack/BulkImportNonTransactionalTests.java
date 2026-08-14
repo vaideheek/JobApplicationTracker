@@ -103,16 +103,7 @@ public class BulkImportNonTransactionalTests {
     void testSimultaneousConfirmation() throws Exception {
         BulkScanResponse scanRes = doScan();
 
-        BulkConfirmApplication appConfirm = new BulkConfirmApplication();
-        appConfirm.setCompanyName("Company_159");
-        appConfirm.setJobTitle("Title_159");
-        appConfirm.setStatus("NO_RESPONSE");
-        appConfirm.setPriority("MEDIUM");
-        appConfirm.setDocuments(Collections.emptyList());
-
-        BulkConfirmRequest request = new BulkConfirmRequest();
-        request.setScanId(scanRes.getScanId());
-        request.setApplications(List.of(appConfirm));
+        BulkConfirmRequest request = buildFullConfirmRequest(scanRes);
 
         String jsonPayload = objectMapper.writeValueAsString(request);
         String csrfToken = getCsrfToken(testSession);
@@ -147,16 +138,7 @@ public class BulkImportNonTransactionalTests {
     void testConfirmIdempotencyCompleted() throws Exception {
         BulkScanResponse scanRes = doScan();
 
-        BulkConfirmApplication appConfirm = new BulkConfirmApplication();
-        appConfirm.setCompanyName("Company_159");
-        appConfirm.setJobTitle("Title_159");
-        appConfirm.setStatus("NO_RESPONSE");
-        appConfirm.setPriority("MEDIUM");
-        appConfirm.setDocuments(Collections.emptyList());
-
-        BulkConfirmRequest request = new BulkConfirmRequest();
-        request.setScanId(scanRes.getScanId());
-        request.setApplications(List.of(appConfirm));
+        BulkConfirmRequest request = buildFullConfirmRequest(scanRes);
 
         String jsonPayload = objectMapper.writeValueAsString(request);
         String csrfToken = getCsrfToken(testSession);
@@ -178,13 +160,41 @@ public class BulkImportNonTransactionalTests {
 
     @Test
     void testDatabaseRollbackAndStorageCompensation() throws Exception {
+        // Seed Tripadvisor
+        JobApplication existingTripadvisor = JobApplication.builder()
+                .companyName("Tripadvisor")
+                .jobTitle("Junior Software Engineer")
+                .status(ApplicationStatus.NO_RESPONSE)
+                .priority(ApplicationPriority.MEDIUM)
+                .user(testUser)
+                .build();
+        existingTripadvisor = jobApplicationRepository.saveAndFlush(existingTripadvisor);
+
+        // Store old document for Tripadvisor
+        String oldDocPath = storageService.store(existingTripadvisor.getId(),
+                new CustomMultipartFile("%PDF-1.4: old doc content".getBytes(), "file", "old_doc.pdf", "application/pdf"),
+                DocumentType.CV, "old_doc.pdf");
+
+        ApplicationDocument oldDoc = ApplicationDocument.builder()
+                .jobApplication(existingTripadvisor)
+                .fileName("old_doc.pdf")
+                .fileType("application/pdf")
+                .documentType(DocumentType.CV)
+                .filePath(oldDocPath)
+                .uploadedAt(LocalDateTime.now())
+                .build();
+        oldDoc = documentRepository.saveAndFlush(oldDoc);
+
         BulkScanResponse scanRes = doScan();
 
-        ScannedApplicationGroup appWithDoc = scanRes.getApplications().stream()
-                .filter(a -> !a.getDocuments().isEmpty())
+        // Find the second app with a document ("Company_2") to delete its temp file
+        ScannedApplicationGroup company2 = scanRes.getApplications().stream()
+                .filter(a -> "Company_2".equals(a.getCompanyName()))
                 .findFirst().orElseThrow();
+        String tempDocId = company2.getDocuments().get(0).getTempDocId();
 
-        String tempDocId = appWithDoc.getDocuments().get(0).getTempDocId();
+        // Get expected new storage path for Tripadvisor's new document (doc_1.pdf)
+        String expectedNewStorageKey = "application-" + existingTripadvisor.getId() + "/doc_1.pdf";
 
         Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "jobtrack-import-" + testUser.getId() + "-" + scanRes.getScanId());
         Path mappingsPath = tempDir.resolve("mappings.json");
@@ -195,22 +205,11 @@ public class BulkImportNonTransactionalTests {
         String sha = docIdToSha.get(tempDocId);
         String tempFilePathStr = shaToTempPath.get(sha);
 
+        // Delete the temp file of Company_2's document
         Files.deleteIfExists(Paths.get(tempFilePathStr));
 
-        BulkConfirmApplication appConfirm = new BulkConfirmApplication();
-        appConfirm.setCompanyName(appWithDoc.getCompanyName());
-        appConfirm.setJobTitle(appWithDoc.getJobTitle());
-        appConfirm.setStatus(appWithDoc.getStatus());
-        appConfirm.setPriority(appWithDoc.getPriority());
-        
-        BulkConfirmDocument docConfirm = new BulkConfirmDocument();
-        docConfirm.setTempDocId(tempDocId);
-        docConfirm.setDocumentType("CV");
-        appConfirm.setDocuments(List.of(docConfirm));
-
-        BulkConfirmRequest request = new BulkConfirmRequest();
-        request.setScanId(scanRes.getScanId());
-        request.setApplications(List.of(appConfirm));
+        // Build the full confirm payload
+        BulkConfirmRequest request = buildFullConfirmRequest(scanRes);
 
         String jsonPayload = objectMapper.writeValueAsString(request);
         String csrfToken = getCsrfToken(testSession);
@@ -222,11 +221,20 @@ public class BulkImportNonTransactionalTests {
                 .header("X-CSRF-TOKEN", csrfToken))
                 .andExpect(status().isInternalServerError());
 
+        // Verify database writes are rolled back
         long count = jobApplicationRepository.count();
         assertEquals(1, count, "All database writes must be rolled back on confirmation failure, leaving only the seeded record.");
 
+        // Assert old document remained in database and storage
+        assertTrue(documentRepository.existsById(oldDoc.getId()), "Old document DB record must still exist after rollback.");
+        assertTrue(storageExists(oldDocPath), "Replaced old file must NOT be deleted from storage if transaction fails.");
+
+        // Assert new storage key stored before failure was deleted
+        assertFalse(storageExists(expectedNewStorageKey), "The new storage key stored before failure must be deleted.");
+
         ImportBatch batch = importBatchRepository.findById(scanRes.getScanId()).orElseThrow();
         assertEquals("FAILED", batch.getState());
+        assertTrue(Files.exists(mappingsPath), "Temporary mappings and files must remain retryable.");
     }
 
     @Test
@@ -258,48 +266,25 @@ public class BulkImportNonTransactionalTests {
 
         BulkScanResponse scanRes = doScan();
 
-        ScannedApplicationGroup tripApp = scanRes.getApplications().stream()
-                .filter(a -> "Tripadvisor".equals(a.getCompanyName()))
+        // Get the tempDocId of Company_2's first document to delete it and trigger failure
+        ScannedApplicationGroup company2 = scanRes.getApplications().stream()
+                .filter(a -> "Company_2".equals(a.getCompanyName()))
                 .findFirst().orElseThrow();
-        String tempDocId = tripApp.getDocuments().get(0).getTempDocId();
-
-        BulkConfirmApplication confirmApp1 = new BulkConfirmApplication();
-        confirmApp1.setCompanyName("Tripadvisor");
-        confirmApp1.setJobTitle("Junior Software Engineer");
-        confirmApp1.setStatus("NO_RESPONSE");
-        confirmApp1.setPriority("MEDIUM");
-        BulkConfirmDocument docConfirm1 = new BulkConfirmDocument();
-        docConfirm1.setTempDocId(tempDocId);
-        docConfirm1.setDocumentType("CV");
-        confirmApp1.setDocuments(List.of(docConfirm1));
-
-        ScannedApplicationGroup failingApp = scanRes.getApplications().stream()
-                .filter(a -> !a.getCompanyName().equals("Tripadvisor") && !a.getDocuments().isEmpty())
-                .findFirst().orElseThrow();
-        String failingTempDocId = failingApp.getDocuments().get(0).getTempDocId();
+        String tempDocId = company2.getDocuments().get(0).getTempDocId();
 
         Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "jobtrack-import-" + testUser.getId() + "-" + scanRes.getScanId());
         Path mappingsPath = tempDir.resolve("mappings.json");
         com.fasterxml.jackson.databind.JsonNode mappingsNode = objectMapper.readTree(Files.readAllBytes(mappingsPath));
         Map<String, String> docIdToSha = objectMapper.convertValue(mappingsNode.get("docIdToSha"), Map.class);
         Map<String, String> shaToTempPath = objectMapper.convertValue(mappingsNode.get("shaToTempPath"), Map.class);
-        String sha = docIdToSha.get(failingTempDocId);
+        String sha = docIdToSha.get(tempDocId);
         String tempFilePathStr = shaToTempPath.get(sha);
+
+        // Delete the temp file of Company_2's document
         Files.deleteIfExists(Paths.get(tempFilePathStr));
 
-        BulkConfirmApplication confirmApp2 = new BulkConfirmApplication();
-        confirmApp2.setCompanyName(failingApp.getCompanyName());
-        confirmApp2.setJobTitle(failingApp.getJobTitle());
-        confirmApp2.setStatus(failingApp.getStatus());
-        confirmApp2.setPriority(failingApp.getPriority());
-        BulkConfirmDocument docConfirm2 = new BulkConfirmDocument();
-        docConfirm2.setTempDocId(failingTempDocId);
-        docConfirm2.setDocumentType("CV");
-        confirmApp2.setDocuments(List.of(docConfirm2));
-
-        BulkConfirmRequest request = new BulkConfirmRequest();
-        request.setScanId(scanRes.getScanId());
-        request.setApplications(List.of(confirmApp1, confirmApp2));
+        // Build the full confirm payload
+        BulkConfirmRequest request = buildFullConfirmRequest(scanRes);
 
         String jsonPayload = objectMapper.writeValueAsString(request);
         String csrfToken = getCsrfToken(testSession);
@@ -313,6 +298,10 @@ public class BulkImportNonTransactionalTests {
 
         assertTrue(documentRepository.existsById(oldDoc.getId()), "Old document DB record must still exist after rollback.");
         assertTrue(storageExists(actualStoredPath), "Replaced old file must NOT be deleted from storage if transaction fails.");
+
+        ImportBatch batch = importBatchRepository.findById(scanRes.getScanId()).orElseThrow();
+        assertEquals("FAILED", batch.getState());
+        assertTrue(Files.exists(mappingsPath), "Temporary mappings and files must remain retryable.");
     }
 
     @Test
@@ -323,16 +312,7 @@ public class BulkImportNonTransactionalTests {
         batch.setState("FAILED");
         importBatchRepository.saveAndFlush(batch);
 
-        BulkConfirmApplication appConfirm = new BulkConfirmApplication();
-        appConfirm.setCompanyName("Company_159");
-        appConfirm.setJobTitle("Title_159");
-        appConfirm.setStatus("NO_RESPONSE");
-        appConfirm.setPriority("MEDIUM");
-        appConfirm.setDocuments(Collections.emptyList());
-
-        BulkConfirmRequest request = new BulkConfirmRequest();
-        request.setScanId(scanRes.getScanId());
-        request.setApplications(List.of(appConfirm));
+        BulkConfirmRequest request = buildFullConfirmRequest(scanRes);
 
         String jsonPayload = objectMapper.writeValueAsString(request);
         String csrfToken = getCsrfToken(testSession);
@@ -426,7 +406,7 @@ public class BulkImportNonTransactionalTests {
             String docId = "DOC-D" + i;
             String relativePath = "Duplicates/dup_" + i + ".pdf";
             String filename = "dup_" + i + ".pdf";
-            String content = "%PDF-1.4: Duplicate content " + i;
+            String content = "%PDF-1.4: Content of doc " + i;
             byte[] contentBytes = content.getBytes(StandardCharsets.UTF_8);
             String sha = getSha256(contentBytes);
 
@@ -498,5 +478,34 @@ public class BulkImportNonTransactionalTests {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(response).get("token").asText();
+    }
+
+    private BulkConfirmRequest buildFullConfirmRequest(BulkScanResponse scanRes) {
+        List<BulkConfirmApplication> applicationsPayload = new ArrayList<>();
+        for (ScannedApplicationGroup app : scanRes.getApplications()) {
+            List<BulkConfirmDocument> docs = new ArrayList<>();
+            for (ScannedDocumentPreview doc : app.getDocuments()) {
+                docs.add(BulkConfirmDocument.builder()
+                        .tempDocId(doc.getTempDocId())
+                        .documentType("CV")
+                        .build());
+            }
+            applicationsPayload.add(BulkConfirmApplication.builder()
+                    .tempAppId(app.getTempAppId())
+                    .companyName(app.getCompanyName())
+                    .jobTitle(app.getJobTitle())
+                    .status(app.getStatus())
+                    .priority(app.getPriority())
+                    .dateApplied(app.getDateApplied())
+                    .stage(app.getStage())
+                    .source(app.getSource())
+                    .notes(app.getNotes())
+                    .documents(docs)
+                    .build());
+        }
+        return BulkConfirmRequest.builder()
+                .scanId(scanRes.getScanId())
+                .applications(applicationsPayload)
+                .build();
     }
 }

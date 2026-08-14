@@ -232,6 +232,24 @@ public class BulkImportService {
             Map<String, String> docIdToSha = new HashMap<>();
             Map<String, String> docIdToOrigName = new HashMap<>();
 
+            // Track non-duplicate SHAs, unique SHAs, and document IDs
+            Set<String> nonDuplicateShas = new HashSet<>();
+            Set<String> allUniqueShas = new HashSet<>();
+            Set<String> requiredAttachTempDocIds = new HashSet<>();
+            Set<String> unassignedDocIds = new HashSet<>();
+
+            for (JsonNode docNode : docsNode) {
+                String sha256 = optString(docNode, "sha256");
+                String disposition = optString(docNode, "disposition");
+                if (sha256 != null && !sha256.isEmpty()) {
+                    String shaLower = sha256.toLowerCase();
+                    allUniqueShas.add(shaLower);
+                    if (!"SKIP_EXACT_DUPLICATE".equalsIgnoreCase(disposition)) {
+                        nonDuplicateShas.add(shaLower);
+                    }
+                }
+            }
+
             // Map to store generated ScannedDocumentPreview for ATTACH documents grouped by manifestApplicationId
             Map<String, List<ScannedDocumentPreview>> appDocPreviews = new HashMap<>();
             List<ScannedDocumentPreview> unassignedList = new ArrayList<>();
@@ -296,16 +314,25 @@ public class BulkImportService {
                         .build();
 
                 if ("SKIP_EXACT_DUPLICATE".equalsIgnoreCase(disposition)) {
+                    if (sha256 == null || !nonDuplicateShas.contains(sha256.toLowerCase())) {
+                        throw new IllegalArgumentException("Scan failed: SKIP_EXACT_DUPLICATE document " + filename + " does not share its SHA-256 with any ATTACH or UNASSIGNED_REVIEW file.");
+                    }
                     skippedDuplicatesCount++;
                 } else if ("UNASSIGNED_REVIEW".equalsIgnoreCase(disposition)) {
                     unassignedList.add(preview);
+                    unassignedDocIds.add(tempDocId);
                 } else if ("ATTACH".equalsIgnoreCase(disposition)) {
                     appDocPreviews.computeIfAbsent(appId, k -> new ArrayList<>()).add(preview);
+                    requiredAttachTempDocIds.add(tempDocId);
                 }
             }
 
             // 3. Process Applications previews
             List<ScannedApplicationGroup> appPreviews = new ArrayList<>();
+            Set<String> scannedTempAppIds = new HashSet<>();
+            Map<String, String> tempAppIdToImportAction = new HashMap<>();
+            Map<String, Long> tempAppIdToExistingAppId = new HashMap<>();
+
             for (JsonNode appNode : appsNode) {
                 String appId = optString(appNode, "manifestApplicationId");
                 String company = optString(appNode, "companyName");
@@ -336,9 +363,15 @@ public class BulkImportService {
                 }
 
                 List<ScannedDocumentPreview> docPreviews = appDocPreviews.getOrDefault(appId, Collections.emptyList());
+                String tempAppId = UUID.randomUUID().toString();
+                scannedTempAppIds.add(tempAppId);
+                tempAppIdToImportAction.put(tempAppId, importAction);
+                if (existingId != null) {
+                    tempAppIdToExistingAppId.put(tempAppId, existingId);
+                }
 
                 appPreviews.add(ScannedApplicationGroup.builder()
-                        .tempAppId(UUID.randomUUID().toString())
+                        .tempAppId(tempAppId)
                         .companyName(company)
                         .jobTitle(title)
                         .dateApplied(dateAppliedStr.isEmpty() ? null : dateAppliedStr)
@@ -376,6 +409,13 @@ public class BulkImportService {
             if (appPreviews.size() != 172) {
                 throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 172 applications, but parsed " + appPreviews.size());
             }
+            if (docsNode.size() != 320) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 320 source files, but found " + docsNode.size());
+            }
+            if (allUniqueShas.size() != 304) {
+                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 304 unique hashes, but found " + allUniqueShas.size());
+            }
+
             long rejectedCount = appPreviews.stream().filter(a -> "REJECTED".equalsIgnoreCase(a.getStatus())).count();
             if (rejectedCount != 57) {
                 throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 57 REJECTED applications, but found " + rejectedCount);
@@ -405,6 +445,11 @@ public class BulkImportService {
             mappings.put("docIdToSha", docIdToSha);
             mappings.put("docIdToOrigName", docIdToOrigName);
             mappings.put("hasValidationErrors", hasValidationErrors);
+            mappings.put("scannedTempAppIds", scannedTempAppIds);
+            mappings.put("requiredAttachTempDocIds", requiredAttachTempDocIds);
+            mappings.put("unassignedDocIds", unassignedDocIds);
+            mappings.put("tempAppIdToImportAction", tempAppIdToImportAction);
+            mappings.put("tempAppIdToExistingAppId", tempAppIdToExistingAppId);
 
             Files.write(tempDir.resolve("mappings.json"), objectMapper.writeValueAsBytes(mappings));
 
@@ -498,15 +543,89 @@ public class BulkImportService {
             Map<String, String> docIdToSha = objectMapper.convertValue(mappingsNode.get("docIdToSha"), Map.class);
             Map<String, String> docIdToOrigName = objectMapper.convertValue(mappingsNode.get("docIdToOrigName"), Map.class);
 
-            // 2. Perform the main import work AND the COMPLETED batch update in the SAME database transaction
+            Set<String> scannedTempAppIds = new HashSet<>(objectMapper.convertValue(mappingsNode.get("scannedTempAppIds"), List.class));
+            Set<String> requiredAttachTempDocIds = new HashSet<>(objectMapper.convertValue(mappingsNode.get("requiredAttachTempDocIds"), List.class));
+            List<String> unassignedDocIdsList = objectMapper.convertValue(mappingsNode.get("unassignedDocIds"), List.class);
+            Set<String> unassignedDocIds = unassignedDocIdsList != null ? new HashSet<>(unassignedDocIdsList) : Collections.emptySet();
+            Map<String, String> tempAppIdToImportAction = objectMapper.convertValue(mappingsNode.get("tempAppIdToImportAction"), Map.class);
+            Map<String, Object> tempAppIdToExistingAppIdRaw = objectMapper.convertValue(mappingsNode.get("tempAppIdToExistingAppId"), Map.class);
+            Map<String, Long> tempAppIdToExistingAppId = new HashMap<>();
+            if (tempAppIdToExistingAppIdRaw != null) {
+                for (Map.Entry<String, Object> entry : tempAppIdToExistingAppIdRaw.entrySet()) {
+                    if (entry.getValue() != null) {
+                        tempAppIdToExistingAppId.put(entry.getKey(), Long.valueOf(entry.getValue().toString()));
+                    }
+                }
+            }
+
+            // 1. Validate application IDs (must require all scanned tempAppId exactly once)
+            Set<String> confirmedAppIds = new HashSet<>();
+            for (BulkConfirmApplication appReq : request.getApplications()) {
+                if (appReq.getTempAppId() == null) {
+                    throw new IllegalArgumentException("Confirmation failed: tempAppId is missing for application " + appReq.getCompanyName());
+                }
+                if (!scannedTempAppIds.contains(appReq.getTempAppId())) {
+                    throw new IllegalArgumentException("Confirmation failed: unexpected tempAppId " + appReq.getTempAppId());
+                }
+                if (!confirmedAppIds.add(appReq.getTempAppId())) {
+                    throw new IllegalArgumentException("Confirmation failed: duplicate tempAppId " + appReq.getTempAppId() + " in confirmation request.");
+                }
+            }
+            if (confirmedAppIds.size() != scannedTempAppIds.size()) {
+                throw new IllegalArgumentException("Confirmation failed: Expected " + scannedTempAppIds.size() + " applications, but received " + confirmedAppIds.size());
+            }
+
+            // 2. Validate document IDs (must require all requiredAttachTempDocIds exactly once)
+            Set<String> confirmedDocIds = new HashSet<>();
+            for (BulkConfirmApplication appReq : request.getApplications()) {
+                if (appReq.getDocuments() != null) {
+                    for (BulkConfirmDocument docReq : appReq.getDocuments()) {
+                        if (docReq.getTempDocId() == null) {
+                            throw new IllegalArgumentException("Confirmation failed: tempDocId is missing.");
+                        }
+                        if (!confirmedDocIds.add(docReq.getTempDocId())) {
+                            throw new IllegalArgumentException("Confirmation failed: duplicate tempDocId " + docReq.getTempDocId() + " in confirmation request.");
+                        }
+                    }
+                }
+            }
+
+            for (String reqDocId : requiredAttachTempDocIds) {
+                if (!confirmedDocIds.contains(reqDocId)) {
+                    throw new IllegalArgumentException("Confirmation failed: required ATTACH document ID " + reqDocId + " is missing from the confirmation request.");
+                }
+            }
+
+            for (String docId : confirmedDocIds) {
+                if (!requiredAttachTempDocIds.contains(docId) && !unassignedDocIds.contains(docId)) {
+                    throw new IllegalArgumentException("Confirmation failed: unexpected tempDocId " + docId);
+                }
+            }
+
+            // 3. Perform the main import work AND the COMPLETED batch update in the SAME database transaction
             TransactionTemplate mainTxTemplate = new TransactionTemplate(transactionManager);
             mainTxTemplate.executeWithoutResult(status -> {
                 for (BulkConfirmApplication appReq : request.getApplications()) {
-                    Optional<JobApplication> existingAppOpt = jobApplicationRepository.findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId(
-                            appReq.getCompanyName(), appReq.getJobTitle(), currentUser.getId()
-                    );
+                    String importAction = tempAppIdToImportAction.get(appReq.getTempAppId());
+                    Long existingId = tempAppIdToExistingAppId.get(appReq.getTempAppId());
 
-                    JobApplication application;
+                    JobApplication application = null;
+                    boolean isExistingMatch = false;
+
+                    if ("MATCH_EXISTING".equalsIgnoreCase(importAction)) {
+                        if (existingId == null) {
+                            throw new IllegalArgumentException("Confirmation failed: Import action is MATCH_EXISTING but no existingApplicationId was persisted for tempAppId " + appReq.getTempAppId());
+                        }
+                        application = jobApplicationRepository.findByIdAndUserId(existingId, currentUser.getId())
+                                .orElseThrow(() -> new ResourceNotFoundException("Existing application not found with ID: " + existingId));
+                        isExistingMatch = true;
+                    } else if (existingId != null) {
+                        application = jobApplicationRepository.findByIdAndUserId(existingId, currentUser.getId()).orElse(null);
+                        if (application != null) {
+                            isExistingMatch = true;
+                        }
+                    }
+
                     ApplicationStatus newStatus = ApplicationStatus.APPLIED;
                     try {
                         newStatus = ApplicationStatus.valueOf(appReq.getStatus().toUpperCase());
@@ -522,8 +641,7 @@ public class BulkImportService {
                         dateApplied = LocalDate.parse(appReq.getDateApplied());
                     }
 
-                    if (existingAppOpt.isPresent()) {
-                        application = existingAppOpt.get();
+                    if (isExistingMatch) {
                         ApplicationStatus oldStatus = application.getStatus();
                         application.setStatus(newStatus);
                         application.setPriority(newPriority);
