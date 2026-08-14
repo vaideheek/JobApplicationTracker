@@ -185,6 +185,20 @@ public class BulkImportNonTransactionalTests {
                 .build();
         oldDoc = documentRepository.saveAndFlush(oldDoc);
 
+        // Get storage service rootLocation dynamically
+        java.lang.reflect.Field field = LocalFileStorageService.class.getDeclaredField("rootLocation");
+        field.setAccessible(true);
+        Path rootLocation = (Path) field.get(storageService);
+
+        // Record/list actual files or storage keys before confirmation
+        Set<String> keysBefore = new HashSet<>();
+        if (Files.exists(rootLocation)) {
+            try (java.util.stream.Stream<Path> stream = Files.walk(rootLocation)) {
+                stream.filter(Files::isRegularFile)
+                      .forEach(p -> keysBefore.add(rootLocation.relativize(p).toString()));
+            }
+        }
+
         BulkScanResponse scanRes = doScan();
 
         // Find the second app with a document ("Company_2") to delete its temp file
@@ -192,9 +206,6 @@ public class BulkImportNonTransactionalTests {
                 .filter(a -> "Company_2".equals(a.getCompanyName()))
                 .findFirst().orElseThrow();
         String tempDocId = company2.getDocuments().get(0).getTempDocId();
-
-        // Get expected new storage path for Tripadvisor's new document (doc_1.pdf)
-        String expectedNewStorageKey = "application-" + existingTripadvisor.getId() + "/doc_1.pdf";
 
         Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "jobtrack-import-" + testUser.getId() + "-" + scanRes.getScanId());
         Path mappingsPath = tempDir.resolve("mappings.json");
@@ -205,7 +216,7 @@ public class BulkImportNonTransactionalTests {
         String sha = docIdToSha.get(tempDocId);
         String tempFilePathStr = shaToTempPath.get(sha);
 
-        // Delete the temp file of Company_2's document
+        // Delete the temp file of Company_2's document to trigger failure after Tripadvisor's upload
         Files.deleteIfExists(Paths.get(tempFilePathStr));
 
         // Build the full confirm payload
@@ -221,20 +232,33 @@ public class BulkImportNonTransactionalTests {
                 .header("X-CSRF-TOKEN", csrfToken))
                 .andExpect(status().isInternalServerError());
 
-        // Verify database writes are rolled back
+        // Record/list actual files or storage keys after confirmation
+        Set<String> keysAfter = new HashSet<>();
+        if (Files.exists(rootLocation)) {
+            try (java.util.stream.Stream<Path> stream = Files.walk(rootLocation)) {
+                stream.filter(Files::isRegularFile)
+                      .forEach(p -> keysAfter.add(rootLocation.relativize(p).toString()));
+            }
+        }
+
+        // Assert: the old key still exists
+        assertTrue(keysAfter.contains(oldDocPath), "Old storage key must still exist.");
+
+        // Assert: no additional/new key remains
+        assertEquals(keysBefore, keysAfter, "No additional or new key must remain after rollback compensation.");
+
+        // Assert: the database rolled back
         long count = jobApplicationRepository.count();
         assertEquals(1, count, "All database writes must be rolled back on confirmation failure, leaving only the seeded record.");
+        long docCount = documentRepository.count();
+        assertEquals(1, docCount, "All database writes must be rolled back, leaving only the seeded document.");
 
-        // Assert old document remained in database and storage
-        assertTrue(documentRepository.existsById(oldDoc.getId()), "Old document DB record must still exist after rollback.");
-        assertTrue(storageExists(oldDocPath), "Replaced old file must NOT be deleted from storage if transaction fails.");
-
-        // Assert new storage key stored before failure was deleted
-        assertFalse(storageExists(expectedNewStorageKey), "The new storage key stored before failure must be deleted.");
-
+        // Assert: the batch is FAILED
         ImportBatch batch = importBatchRepository.findById(scanRes.getScanId()).orElseThrow();
         assertEquals("FAILED", batch.getState());
-        assertTrue(Files.exists(mappingsPath), "Temporary mappings and files must remain retryable.");
+
+        // Assert: temporary import files remain
+        assertTrue(Files.exists(mappingsPath), "Temporary mappings and files must remain retryable on failure.");
     }
 
     @Test
@@ -248,8 +272,8 @@ public class BulkImportNonTransactionalTests {
                 .build();
         existingApp = jobApplicationRepository.saveAndFlush(existingApp);
 
-        String actualStoredPath = storageService.store(existingApp.getId(), 
-                new CustomMultipartFile("%PDF-1.4: old doc content".getBytes(), "file", "old_doc.pdf", "application/pdf"), 
+        String actualStoredPath = storageService.store(existingApp.getId(),
+                new CustomMultipartFile("%PDF-1.4: old doc content".getBytes(), "file", "old_doc.pdf", "application/pdf"),
                 DocumentType.CV, "old_doc.pdf");
 
         ApplicationDocument oldDoc = ApplicationDocument.builder()
@@ -369,7 +393,7 @@ public class BulkImportNonTransactionalTests {
         int docIndex = 1;
         for (int i = 0; i < 85; i++) {
             String appId = appIds.get(i);
-            int docsForThisApp = (i < 65) ? 3 : 2; 
+            int docsForThisApp = (i < 65) ? 3 : 2;
             for (int d = 0; d < docsForThisApp; d++) {
                 String docId = "DOC-" + String.format("%03d", docIndex);
                 String relativePath = "Folder" + i + "/doc_" + docIndex + ".pdf";

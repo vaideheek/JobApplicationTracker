@@ -367,7 +367,7 @@ public class BulkImportTests {
         int docIndex = 1;
         for (int i = 0; i < 85; i++) {
             String appId = appIds.get(i);
-            int docsForThisApp = (i < 65) ? 3 : 2; 
+            int docsForThisApp = (i < 65) ? 3 : 2;
             for (int d = 0; d < docsForThisApp; d++) {
                 String docId = "DOC-" + String.format("%03d", docIndex);
                 String relativePath = "Folder" + i + "/doc_" + docIndex + ".pdf";
@@ -474,7 +474,7 @@ public class BulkImportTests {
         int docIndex = 1;
         for (int i = 0; i < 85; i++) {
             String appId = appIds.get(i);
-            int docsForThisApp = (i < 65) ? 3 : 2; 
+            int docsForThisApp = (i < 65) ? 3 : 2;
             for (int d = 0; d < docsForThisApp; d++) {
                 String docId = "DOC-" + String.format("%03d", docIndex);
                 String relativePath = "Folder" + i + "/doc_" + docIndex + ".pdf";
