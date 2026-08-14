@@ -15,6 +15,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
@@ -109,7 +110,7 @@ public class BulkImportService {
                             throw new SecurityException("ZIP slip attempt detected: " + name);
                         }
 
-                        if (entry.isDirectory() || name.contains("__MACOSX") || Paths.get(name).getFileName().toString().startsWith("._")) {
+                        if (entry.isDirectory() || name.contains("__MACOSX") || name.contains(".DS_Store") || Paths.get(name).getFileName().toString().startsWith("._")) {
                             continue;
                         }
 
@@ -169,7 +170,7 @@ public class BulkImportService {
                             throw new SecurityException("ZIP slip attempt detected: " + name);
                         }
 
-                        if (entry.isDirectory() || name.contains("__MACOSX") || Paths.get(name).getFileName().toString().startsWith("._")) {
+                        if (entry.isDirectory() || name.contains("__MACOSX") || name.contains(".DS_Store") || Paths.get(name).getFileName().toString().startsWith("._")) {
                             continue;
                         }
 
@@ -226,6 +227,7 @@ public class BulkImportService {
             }
 
             boolean hasValidationErrors = false;
+            List<String> validationIssues = new ArrayList<>();
             Set<String> matchedZipPaths = new HashSet<>();
             Map<String, String> docIdToSha = new HashMap<>();
             Map<String, String> docIdToOrigName = new HashMap<>();
@@ -273,9 +275,11 @@ public class BulkImportService {
                     } else {
                         validationStatus = "CHANGED";
                         hasValidationErrors = true;
+                        validationIssues.add("Document " + filename + " (path: " + normExpected + ") size or checksum has changed.");
                     }
                 } else {
                     hasValidationErrors = true;
+                    validationIssues.add("Document " + filename + " (path: " + normExpected + ") is missing from ZIP archives.");
                 }
 
                 String tempDocId = UUID.randomUUID().toString();
@@ -312,6 +316,7 @@ public class BulkImportService {
                 String stage = optString(appNode, "stage");
                 String source = optString(appNode, "source");
                 String notes = optString(appNode, "notes");
+                String importAction = optString(appNode, "importAction");
 
                 if (company.isEmpty() || title.isEmpty()) {
                     continue;
@@ -326,6 +331,8 @@ public class BulkImportService {
                 if (existingApp.isPresent()) {
                     isDuplicate = true;
                     existingId = existingApp.get().getId();
+                } else if ("MATCH_EXISTING".equalsIgnoreCase(importAction)) {
+                    throw new IllegalArgumentException("Scan failed: Import action is MATCH_EXISTING but no matching database record was found for " + company + " - " + title);
                 }
 
                 List<ScannedDocumentPreview> docPreviews = appDocPreviews.getOrDefault(appId, Collections.emptyList());
@@ -350,15 +357,22 @@ public class BulkImportService {
             for (String key : laptopFiles.keySet()) {
                 if (!matchedZipPaths.contains(key)) {
                     hasValidationErrors = true;
+                    validationIssues.add("Unexpected file " + key + " found in LAPTOP ZIP.");
                 }
             }
             for (String key : driveFiles.keySet()) {
                 if (!matchedZipPaths.contains(key)) {
                     hasValidationErrors = true;
+                    validationIssues.add("Unexpected file " + key + " found in GOOGLE_DRIVE ZIP.");
                 }
             }
 
-            // 5. Verification Check Rules
+            if (appPreviews.isEmpty()) {
+                hasValidationErrors = true;
+                validationIssues.add("No applications found in the manifest.");
+            }
+
+            // 5. Verification Check Rules (Fail scanning if counts mismatch)
             if (appPreviews.size() != 172) {
                 throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 172 applications, but parsed " + appPreviews.size());
             }
@@ -410,6 +424,8 @@ public class BulkImportService {
                     .scanId(scanId)
                     .applications(appPreviews)
                     .unassignedFiles(unassignedList)
+                    .canConfirm(!hasValidationErrors)
+                    .validationIssues(validationIssues)
                     .build();
 
         } catch (Exception e) {
@@ -428,39 +444,49 @@ public class BulkImportService {
             throw new IllegalArgumentException("Confirmation rejected: Applications list cannot be empty.");
         }
 
-        // Lock batch atomically
-        ImportBatch batch = importBatchRepository.findByIdAndUserIdForUpdate(request.getScanId(), currentUser.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Import Batch not found with id: " + request.getScanId()));
+        // 1. Acquire and persist the PROCESSING claim inside a real TransactionTemplate transaction (propagation REQUIRES_NEW)
+        TransactionTemplate claimTxTemplate = new TransactionTemplate(transactionManager);
+        claimTxTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
 
-        if ("PROCESSING".equals(batch.getState()) || "COMPLETED".equals(batch.getState())) {
-            return BulkConfirmResponse.builder()
-                    .successCount(request.getApplications().size())
-                    .failureCount(0)
-                    .documentFailures(new ArrayList<>())
-                    .build();
+        try {
+            claimTxTemplate.executeWithoutResult(status -> {
+                ImportBatch b = importBatchRepository.findByIdAndUserIdForUpdate(request.getScanId(), currentUser.getId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Import Batch not found with id: " + request.getScanId()));
+
+                if ("PROCESSING".equals(b.getState())) {
+                    throw new ConflictException("Import batch is currently being processed.");
+                }
+                if ("COMPLETED".equals(b.getState())) {
+                    throw new ConflictException("Import batch has already been completed.");
+                }
+
+                b.setState("PROCESSING");
+                importBatchRepository.saveAndFlush(b);
+            });
+        } catch (ConflictException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new RuntimeException("Failed to acquire PROCESSING claim: " + ex.getMessage(), ex);
         }
-
-        Optional<ImportBatch> completed = importBatchRepository.findByUserIdAndManifestHashAndState(
-                currentUser.getId(), batch.getManifestHash(), "COMPLETED"
-        );
-        if (completed.isPresent()) {
-            throw new IllegalStateException("This manifest hash has already been imported.");
-        }
-
-        batch.setState("PROCESSING");
-        importBatchRepository.saveAndFlush(batch);
 
         Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "jobtrack-import-" + currentUser.getId() + "-" + request.getScanId());
         Path mappingsPath = tempDir.resolve("mappings.json");
         if (!Files.exists(mappingsPath)) {
-            batch.setState("FAILED");
-            importBatchRepository.save(batch);
+            // Set batch to FAILED in a separate REQUIRES_NEW transaction
+            TransactionTemplate failTxTemplate = new TransactionTemplate(transactionManager);
+            failTxTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
+            failTxTemplate.executeWithoutResult(status -> {
+                ImportBatch b = importBatchRepository.findById(request.getScanId()).orElse(null);
+                if (b != null) {
+                    b.setState("FAILED");
+                    importBatchRepository.saveAndFlush(b);
+                }
+            });
             throw new IllegalStateException("Import mappings config has expired or is missing.");
         }
 
         List<String> uploadedStorageKeys = new ArrayList<>();
 
-        // Read validation errors config
         try {
             JsonNode mappingsNode = objectMapper.readTree(Files.readAllBytes(mappingsPath));
             boolean hasValidationErrors = mappingsNode.has("hasValidationErrors") && mappingsNode.get("hasValidationErrors").asBoolean();
@@ -472,9 +498,9 @@ public class BulkImportService {
             Map<String, String> docIdToSha = objectMapper.convertValue(mappingsNode.get("docIdToSha"), Map.class);
             Map<String, String> docIdToOrigName = objectMapper.convertValue(mappingsNode.get("docIdToOrigName"), Map.class);
 
-            // Run database inserts programmatically inside a transaction
-            TransactionStatus txStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
-            try {
+            // 2. Perform the main import work AND the COMPLETED batch update in the SAME database transaction
+            TransactionTemplate mainTxTemplate = new TransactionTemplate(transactionManager);
+            mainTxTemplate.executeWithoutResult(status -> {
                 for (BulkConfirmApplication appReq : request.getApplications()) {
                     Optional<JobApplication> existingAppOpt = jobApplicationRepository.findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId(
                             appReq.getCompanyName(), appReq.getJobTitle(), currentUser.getId()
@@ -565,10 +591,20 @@ public class BulkImportService {
 
                             Path tempFile = Paths.get(tempFilePathStr);
                             if (!Files.exists(tempFile)) {
-                                throw new FileNotFoundException("Temporary file missing: " + origName);
+                                try {
+                                    throw new FileNotFoundException("Temporary file missing: " + origName);
+                                } catch (FileNotFoundException e) {
+                                    throw new RuntimeException(e);
+                                }
                             }
 
-                            byte[] fileBytes = Files.readAllBytes(tempFile);
+                            byte[] fileBytes;
+                            try {
+                                fileBytes = Files.readAllBytes(tempFile);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+
                             String contentType = "application/octet-stream";
                             if (origName.toLowerCase().endsWith(".pdf")) {
                                 contentType = "application/pdf";
@@ -598,20 +634,17 @@ public class BulkImportService {
                     }
                 }
 
-                transactionManager.commit(txStatus);
-
-            } catch (Exception ex) {
-                transactionManager.rollback(txStatus);
-                throw ex;
-            }
+                // Update Import Batch state to COMPLETED inside the same database transaction
+                ImportBatch dbBatch = importBatchRepository.findById(request.getScanId())
+                        .orElseThrow(() -> new ResourceNotFoundException("Import Batch not found with id: " + request.getScanId()));
+                dbBatch.setState("COMPLETED");
+                dbBatch.setResultSummary(String.format("Imported %d applications. Documents uploaded: %d.",
+                        request.getApplications().size(), uploadedStorageKeys.size()));
+                importBatchRepository.saveAndFlush(dbBatch);
+            });
 
             // Cleanup scan assets on successful confirmation
             cleanupTempDir(tempDir);
-
-            batch.setState("COMPLETED");
-            batch.setResultSummary(String.format("Imported %d applications. Documents uploaded: %d.",
-                    request.getApplications().size(), uploadedStorageKeys.size()));
-            importBatchRepository.save(batch);
 
             return BulkConfirmResponse.builder()
                     .successCount(request.getApplications().size())
@@ -621,7 +654,8 @@ public class BulkImportService {
 
         } catch (Exception ex) {
             log.error("Failed finalizing bulk import, initiating storage compensation", ex);
-            // Storage Compensation for database rollback
+
+            // Storage Compensation for database rollback: ONLY triggered if database transaction was rolled back
             for (String key : uploadedStorageKeys) {
                 try {
                     storageService.delete(key);
@@ -630,17 +664,27 @@ public class BulkImportService {
                 }
             }
 
-            // Mark batch as FAILED in database (separate transaction)
-            TransactionStatus failTxStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
+            // Mark batch as FAILED in database (separate REQUIRES_NEW transaction)
+            TransactionTemplate failTxTemplate = new TransactionTemplate(transactionManager);
+            failTxTemplate.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
             try {
-                ImportBatch dbBatch = importBatchRepository.findById(batch.getId()).orElse(batch);
-                dbBatch.setState("FAILED");
-                importBatchRepository.save(dbBatch);
-                transactionManager.commit(failTxStatus);
+                failTxTemplate.executeWithoutResult(status -> {
+                    ImportBatch dbBatch = importBatchRepository.findById(request.getScanId()).orElse(null);
+                    if (dbBatch != null) {
+                        dbBatch.setState("FAILED");
+                        importBatchRepository.saveAndFlush(dbBatch);
+                    }
+                });
             } catch (Exception dbEx) {
-                transactionManager.rollback(failTxStatus);
+                log.error("Failed marking batch as FAILED in database", dbEx);
             }
 
+            if (ex instanceof ConflictException) {
+                throw (ConflictException) ex;
+            }
+            if (ex instanceof IllegalArgumentException) {
+                throw (IllegalArgumentException) ex;
+            }
             throw new RuntimeException("Import confirmation failed: " + ex.getMessage(), ex);
         }
     }

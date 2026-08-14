@@ -212,6 +212,8 @@ export interface BulkScanResponse {
   scanId: string;
   applications: ScannedApplicationGroup[];
   unassignedFiles: ScannedDocumentPreview[];
+  canConfirm: boolean;
+  validationIssues: string[];
 }
 
 export interface BulkConfirmDocument {

@@ -335,6 +335,17 @@ export default function BulkImport() {
       {/* Preview Section */}
       {scanResult && !isLoading && (
         <div className="space-y-8">
+          {scanResult.validationIssues && scanResult.validationIssues.length > 0 && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-800 space-y-2">
+              <h3 className="font-bold text-red-900">Validation Issues Found:</h3>
+              <ul className="list-disc pl-5 space-y-1">
+                {scanResult.validationIssues.map((issue, index) => (
+                  <li key={index}>{issue}</li>
+                ))}
+              </ul>
+              <p className="text-xs text-red-700 mt-2">Please fix these issues to enable confirmation and import.</p>
+            </div>
+          )}
           {/* Applications list */}
           <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="border-b border-slate-200 bg-slate-50/50 px-6 py-4">
@@ -562,7 +573,7 @@ export default function BulkImport() {
             </button>
             <button
               onClick={handleConfirmImport}
-              disabled={isLoading}
+              disabled={isLoading || !scanResult.canConfirm}
               className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-500 disabled:opacity-50 transition-colors"
             >
               {isLoading ? (
