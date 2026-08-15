@@ -195,6 +195,7 @@ export interface ScannedDocumentPreview {
 
 export interface ScannedApplicationGroup {
   tempAppId: string;
+  manifestApplicationId: string;
   companyName: string;
   jobTitle: string;
   dateApplied: string | null;
@@ -202,6 +203,8 @@ export interface ScannedApplicationGroup {
   priority: string;
   isDuplicate: boolean;
   existingApplicationId: number | null;
+  importAction: string;
+  evidenceConfidence: string;
   stage: string | null;
   source: string | null;
   notes: string | null;

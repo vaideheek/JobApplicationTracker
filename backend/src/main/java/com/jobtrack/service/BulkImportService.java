@@ -44,10 +44,17 @@ public class BulkImportService {
     private final StatusHistoryRepository statusHistoryRepository;
     private final PlatformTransactionManager transactionManager;
 
-    private static final long MAX_ZIP_EXPANDED_SIZE = 200 * 1024 * 1024; // 200 MB
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-    private static final int MAX_RAW_ENTRIES = 1000;
-    private static final int MAX_SUPPORTED_DOCUMENTS = 400;
+    @org.springframework.beans.factory.annotation.Value("${jobtrack.import.max-zip-expanded-size:209715200}")
+    private long maxZipExpandedSize;
+
+    @org.springframework.beans.factory.annotation.Value("${jobtrack.import.max-file-size:10485760}")
+    private long maxFileSize;
+
+    @org.springframework.beans.factory.annotation.Value("${jobtrack.import.max-raw-entries:1000}")
+    private int maxRawEntries;
+
+    @org.springframework.beans.factory.annotation.Value("${jobtrack.import.max-supported-documents:400}")
+    private int maxSupportedDocuments;
 
     private static class ZipFileInfo {
         String sha256;
@@ -100,8 +107,8 @@ public class BulkImportService {
                     ZipEntry entry;
                     while ((entry = zis.getNextEntry()) != null) {
                         totalRawEntries++;
-                        if (totalRawEntries > MAX_RAW_ENTRIES) {
-                            throw new IllegalArgumentException("ZIP contains too many raw entries. Maximum allowed is " + MAX_RAW_ENTRIES);
+                        if (totalRawEntries > maxRawEntries) {
+                            throw new IllegalArgumentException("ZIP contains too many raw entries. Maximum allowed is " + maxRawEntries);
                         }
 
                         String name = entry.getName();
@@ -115,8 +122,8 @@ public class BulkImportService {
                         }
 
                         totalExtractedDocs++;
-                        if (totalExtractedDocs > MAX_SUPPORTED_DOCUMENTS) {
-                            throw new IllegalArgumentException("ZIP contains too many supported documents. Maximum allowed is " + MAX_SUPPORTED_DOCUMENTS);
+                        if (totalExtractedDocs > maxSupportedDocuments) {
+                            throw new IllegalArgumentException("ZIP contains too many supported documents. Maximum allowed is " + maxSupportedDocuments);
                         }
 
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -126,10 +133,10 @@ public class BulkImportService {
                         while ((bytesRead = zis.read(buffer)) != -1) {
                             fileBytesCount += bytesRead;
                             totalUncompressedBytes += bytesRead;
-                            if (fileBytesCount > MAX_FILE_SIZE) {
+                            if (fileBytesCount > maxFileSize) {
                                 throw new IllegalArgumentException("File " + name + " exceeds maximum size of 10MB");
                             }
-                            if (totalUncompressedBytes > MAX_ZIP_EXPANDED_SIZE) {
+                            if (totalUncompressedBytes > maxZipExpandedSize) {
                                 throw new IllegalArgumentException("Total uncompressed ZIP size exceeds maximum limit of 200MB");
                             }
                             baos.write(buffer, 0, bytesRead);
@@ -160,8 +167,8 @@ public class BulkImportService {
                     ZipEntry entry;
                     while ((entry = zis.getNextEntry()) != null) {
                         totalRawEntries++;
-                        if (totalRawEntries > MAX_RAW_ENTRIES) {
-                            throw new IllegalArgumentException("ZIP contains too many raw entries. Maximum allowed is " + MAX_RAW_ENTRIES);
+                        if (totalRawEntries > maxRawEntries) {
+                            throw new IllegalArgumentException("ZIP contains too many raw entries. Maximum allowed is " + maxRawEntries);
                         }
 
                         String name = entry.getName();
@@ -175,8 +182,8 @@ public class BulkImportService {
                         }
 
                         totalExtractedDocs++;
-                        if (totalExtractedDocs > MAX_SUPPORTED_DOCUMENTS) {
-                            throw new IllegalArgumentException("ZIP contains too many supported documents. Maximum allowed is " + MAX_SUPPORTED_DOCUMENTS);
+                        if (totalExtractedDocs > maxSupportedDocuments) {
+                            throw new IllegalArgumentException("ZIP contains too many supported documents. Maximum allowed is " + maxSupportedDocuments);
                         }
 
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -186,10 +193,10 @@ public class BulkImportService {
                         while ((bytesRead = zis.read(buffer)) != -1) {
                             fileBytesCount += bytesRead;
                             totalUncompressedBytes += bytesRead;
-                            if (fileBytesCount > MAX_FILE_SIZE) {
+                            if (fileBytesCount > maxFileSize) {
                                 throw new IllegalArgumentException("File " + name + " exceeds maximum size of 10MB");
                             }
-                            if (totalUncompressedBytes > MAX_ZIP_EXPANDED_SIZE) {
+                            if (totalUncompressedBytes > maxZipExpandedSize) {
                                 throw new IllegalArgumentException("Total uncompressed ZIP size exceeds maximum limit of 200MB");
                             }
                             baos.write(buffer, 0, bytesRead);
@@ -357,7 +364,12 @@ public class BulkImportService {
                 );
                 if (existingApp.isPresent()) {
                     isDuplicate = true;
-                    existingId = existingApp.get().getId();
+                    if ("MATCH_EXISTING".equalsIgnoreCase(importAction)) {
+                        existingId = existingApp.get().getId();
+                    } else if ("CREATE_OR_MATCH_EXACT".equalsIgnoreCase(importAction)) {
+                        hasValidationErrors = true;
+                        validationIssues.add("Application " + company + " - " + title + " matches an existing record but does not have a MATCH_EXISTING action.");
+                    }
                 } else if ("MATCH_EXISTING".equalsIgnoreCase(importAction)) {
                     throw new IllegalArgumentException("Scan failed: Import action is MATCH_EXISTING but no matching database record was found for " + company + " - " + title);
                 }
@@ -370,8 +382,12 @@ public class BulkImportService {
                     tempAppIdToExistingAppId.put(tempAppId, existingId);
                 }
 
+                JsonNode evidenceNode = appNode.get("evidence");
+                String evidenceConfidence = (evidenceNode != null) ? optString(evidenceNode, "confidence") : "Low";
+
                 appPreviews.add(ScannedApplicationGroup.builder()
                         .tempAppId(tempAppId)
+                        .manifestApplicationId(appId)
                         .companyName(company)
                         .jobTitle(title)
                         .dateApplied(dateAppliedStr.isEmpty() ? null : dateAppliedStr)
@@ -382,6 +398,8 @@ public class BulkImportService {
                         .stage(stage)
                         .source(source)
                         .notes(notes)
+                        .importAction(importAction)
+                        .evidenceConfidence(evidenceConfidence)
                         .documents(docPreviews)
                         .build());
             }
@@ -405,38 +423,106 @@ public class BulkImportService {
                 validationIssues.add("No applications found in the manifest.");
             }
 
-            // 5. Verification Check Rules (Fail scanning if counts mismatch)
-            if (appPreviews.size() != 172) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 172 applications, but parsed " + appPreviews.size());
-            }
-            if (docsNode.size() != 320) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 320 source files, but found " + docsNode.size());
-            }
-            if (allUniqueShas.size() != 304) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 304 unique hashes, but found " + allUniqueShas.size());
-            }
+            // 5. Dynamic Verification Check Rules (Fail scanning if counts mismatch)
+            JsonNode summaryNode = manifestNode.get("summary");
+            if (summaryNode != null) {
+                int declaredApps = summaryNode.path("applications").asInt();
+                int declaredCompanies = summaryNode.path("companies").asInt();
+                int declaredRejected = summaryNode.path("rejected").asInt();
+                int declaredWithdrawn = summaryNode.path("withdrawn").asInt();
+                int declaredNoResponse = summaryNode.path("noResponse").asInt();
+                int declaredSourceFiles = summaryNode.path("sourceFiles").asInt();
+                int declaredDuplicatesSkipped = summaryNode.path("exactDuplicateCopiesSkipped").asInt();
+                int declaredUniqueFiles = summaryNode.path("uniqueFiles").asInt();
+                int declaredFilesToAttach = summaryNode.path("filesReadyToAttach").asInt();
+                int declaredUnassignedFiles = summaryNode.path("uniqueUnassignedFiles").asInt();
+                int declaredAppsWithFiles = summaryNode.path("applicationsWithAttachedFiles").asInt();
+                int declaredPrimaryCvs = summaryNode.path("primaryCvs").asInt();
+                int declaredPrimaryCoverLetters = summaryNode.path("primaryCoverLetters").asInt();
 
-            long rejectedCount = appPreviews.stream().filter(a -> "REJECTED".equalsIgnoreCase(a.getStatus())).count();
-            if (rejectedCount != 57) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 57 REJECTED applications, but found " + rejectedCount);
-            }
-            long noResponseCount = appPreviews.stream().filter(a -> "NO_RESPONSE".equalsIgnoreCase(a.getStatus())).count();
-            if (noResponseCount != 115) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 115 NO_RESPONSE applications, but found " + noResponseCount);
-            }
-            int totalAttachments = appPreviews.stream().mapToInt(a -> a.getDocuments().size()).sum();
-            if (totalAttachments != 235) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 235 attachments, but found " + totalAttachments);
-            }
-            long appsWithFiles = appPreviews.stream().filter(a -> !a.getDocuments().isEmpty()).count();
-            if (appsWithFiles != 85) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 85 applications with attachments, but found " + appsWithFiles);
-            }
-            if (unassignedList.size() != 69) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 69 unassigned unique files, but found " + unassignedList.size());
-            }
-            if (skippedDuplicatesCount != 16) {
-                throw new IllegalArgumentException("Scan failed verification rules: Expected exactly 16 exact duplicates skipped, but found " + skippedDuplicatesCount);
+                int actualApps = appPreviews.size();
+                Set<String> companyNames = new HashSet<>();
+                int actualRejected = 0;
+                int actualWithdrawn = 0;
+                int actualNoResponse = 0;
+                for (ScannedApplicationGroup app : appPreviews) {
+                    String comp = app.getCompanyName();
+                    if (comp != null && !comp.trim().isEmpty()) {
+                        companyNames.add(comp.toLowerCase().trim());
+                    }
+                    String stat = app.getStatus();
+                    if ("REJECTED".equalsIgnoreCase(stat)) actualRejected++;
+                    else if ("WITHDRAWN".equalsIgnoreCase(stat)) actualWithdrawn++;
+                    else if ("NO_RESPONSE".equalsIgnoreCase(stat)) actualNoResponse++;
+                }
+                int actualCompanies = companyNames.size();
+
+                int actualSourceFiles = docsNode.size();
+                int actualDuplicatesSkipped = (int) skippedDuplicatesCount;
+                int actualFilesToAttach = appPreviews.stream().mapToInt(a -> a.getDocuments().size()).sum();
+                int actualUnassignedFiles = unassignedList.size();
+                int actualUniqueFiles = allUniqueShas.size();
+
+                Set<String> appsWithFilesSet = new HashSet<>();
+                int actualPrimaryCvs = 0;
+                int actualPrimaryCoverLetters = 0;
+                for (JsonNode docNode : docsNode) {
+                    String disp = optString(docNode, "disposition");
+                    String appId = optString(docNode, "manifestApplicationId");
+                    String type = optString(docNode, "uploadDocumentType");
+
+                    if ("ATTACH".equalsIgnoreCase(disp)) {
+                        if (appId != null && !appId.isEmpty()) {
+                            appsWithFilesSet.add(appId);
+                        }
+                        if ("CV".equalsIgnoreCase(type)) {
+                            actualPrimaryCvs++;
+                        } else if ("COVER_LETTER".equalsIgnoreCase(type)) {
+                            actualPrimaryCoverLetters++;
+                        }
+                    }
+                }
+                int actualAppsWithFiles = appsWithFilesSet.size();
+
+                if (actualApps != declaredApps) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'applications' count declared as " + declaredApps + ", but found " + actualApps);
+                }
+                if (actualCompanies != declaredCompanies) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'companies' count declared as " + declaredCompanies + ", but found " + actualCompanies);
+                }
+                if (actualRejected != declaredRejected) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'rejected' count declared as " + declaredRejected + ", but found " + actualRejected);
+                }
+                if (actualWithdrawn != declaredWithdrawn) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'withdrawn' count declared as " + declaredWithdrawn + ", but found " + actualWithdrawn);
+                }
+                if (actualNoResponse != declaredNoResponse) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'noResponse' count declared as " + declaredNoResponse + ", but found " + actualNoResponse);
+                }
+                if (actualSourceFiles != declaredSourceFiles) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'sourceFiles' count declared as " + declaredSourceFiles + ", but found " + actualSourceFiles);
+                }
+                if (actualDuplicatesSkipped != declaredDuplicatesSkipped) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'exactDuplicateCopiesSkipped' count declared as " + declaredDuplicatesSkipped + ", but found " + actualDuplicatesSkipped);
+                }
+                if (actualUniqueFiles != declaredUniqueFiles) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'uniqueFiles' count declared as " + declaredUniqueFiles + ", but found " + actualUniqueFiles);
+                }
+                if (actualFilesToAttach != declaredFilesToAttach) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'filesReadyToAttach' count declared as " + declaredFilesToAttach + ", but found " + actualFilesToAttach);
+                }
+                if (actualUnassignedFiles != declaredUnassignedFiles) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'uniqueUnassignedFiles' count declared as " + declaredUnassignedFiles + ", but found " + actualUnassignedFiles);
+                }
+                if (actualAppsWithFiles != declaredAppsWithFiles) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'applicationsWithAttachedFiles' count declared as " + declaredAppsWithFiles + ", but found " + actualAppsWithFiles);
+                }
+                if (actualPrimaryCvs != declaredPrimaryCvs) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'primaryCvs' count declared as " + declaredPrimaryCvs + ", but found " + actualPrimaryCvs);
+                }
+                if (actualPrimaryCoverLetters != declaredPrimaryCoverLetters) {
+                    throw new IllegalArgumentException("Inconsistent manifest summary: 'primaryCoverLetters' count declared as " + declaredPrimaryCoverLetters + ", but found " + actualPrimaryCoverLetters);
+                }
             }
 
             // Persist metadata mappings for confirm lookup
@@ -473,6 +559,10 @@ public class BulkImportService {
                     .validationIssues(validationIssues)
                     .build();
 
+        } catch (IllegalArgumentException | SecurityException e) {
+            log.error("Failed scanning bulk imports", e);
+            cleanupTempDir(tempDir);
+            throw e;
         } catch (Exception e) {
             log.error("Failed scanning bulk imports", e);
             cleanupTempDir(tempDir);
@@ -619,11 +709,6 @@ public class BulkImportService {
                         application = jobApplicationRepository.findByIdAndUserId(existingId, currentUser.getId())
                                 .orElseThrow(() -> new ResourceNotFoundException("Existing application not found with ID: " + existingId));
                         isExistingMatch = true;
-                    } else if (existingId != null) {
-                        application = jobApplicationRepository.findByIdAndUserId(existingId, currentUser.getId()).orElse(null);
-                        if (application != null) {
-                            isExistingMatch = true;
-                        }
                     }
 
                     ApplicationStatus newStatus = ApplicationStatus.APPLIED;
@@ -802,6 +887,9 @@ public class BulkImportService {
             }
             if (ex instanceof IllegalArgumentException) {
                 throw (IllegalArgumentException) ex;
+            }
+            if (ex instanceof ResourceNotFoundException) {
+                throw (ResourceNotFoundException) ex;
             }
             throw new RuntimeException("Import confirmation failed: " + ex.getMessage(), ex);
         }

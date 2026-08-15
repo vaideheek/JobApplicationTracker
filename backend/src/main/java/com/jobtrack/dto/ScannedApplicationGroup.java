@@ -9,6 +9,7 @@ import java.util.List;
 @AllArgsConstructor
 public class ScannedApplicationGroup {
     private String tempAppId;
+    private String manifestApplicationId;
     private String companyName;
     private String jobTitle;
     private String dateApplied;
@@ -19,5 +20,7 @@ public class ScannedApplicationGroup {
     private String stage;
     private String source;
     private String notes;
+    private String importAction;
+    private String evidenceConfidence;
     private List<ScannedDocumentPreview> documents;
 }
