@@ -732,6 +732,287 @@ public class BulkImportTests {
 
 
 
+    @Test
+    void testZipSlipRejection() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":1,\"companies\":1,\"rejected\":0,\"withdrawn\":0,\"noResponse\":1," +
+            "\"sourceFiles\":1,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":1," +
+            "\"filesReadyToAttach\":1,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":1," +
+            "\"primaryCvs\":1,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-1\",\"companyName\":\"SlipCorp\",\"jobTitle\":\"Developer\",\"status\":\"NO_RESPONSE\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}" +
+            "],\"documents\":[" +
+            "{\"manifestDocumentId\":\"DOC-1\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"../../outside.pdf\",\"filename\":\"outside.pdf\",\"sizeBytes\":12,\"sha256\":\"a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3\",\"manifestApplicationId\":\"APP-1\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}" +
+            "]}";
+
+        Map<String, String> zip1Entries = new HashMap<>();
+        zip1Entries.put("JobApps/../../outside.pdf", "some content");
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(zip1Entries);
+        byte[] driveBytes = createMockZip(new HashMap<>());
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testZipBombRawEntriesLimitRejection() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":1,\"companies\":1,\"rejected\":0,\"withdrawn\":0,\"noResponse\":1," +
+            "\"sourceFiles\":1,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":1," +
+            "\"filesReadyToAttach\":1,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":1," +
+            "\"primaryCvs\":1,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-1\",\"companyName\":\"BombCorp\",\"jobTitle\":\"Developer\",\"status\":\"NO_RESPONSE\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}" +
+            "],\"documents\":[" +
+            "{\"manifestDocumentId\":\"DOC-1\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"doc.pdf\",\"filename\":\"doc.pdf\",\"sizeBytes\":1,\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"manifestApplicationId\":\"APP-1\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}" +
+            "]}";
+
+        Map<String, String> zip1Entries = new HashMap<>();
+        zip1Entries.put("JobApps/doc.pdf", "");
+        // Add 1005 mock entries to exceed maxRawEntries (1000)
+        for (int i = 0; i < 1005; i++) {
+            zip1Entries.put("JobApps/extra_" + i + ".pdf", "c");
+        }
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(zip1Entries);
+        byte[] driveBytes = createMockZip(new HashMap<>());
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testChangedDocumentHashMismatch() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":1,\"companies\":1,\"rejected\":0,\"withdrawn\":0,\"noResponse\":1," +
+            "\"sourceFiles\":1,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":1," +
+            "\"filesReadyToAttach\":1,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":1," +
+            "\"primaryCvs\":1,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-1\",\"companyName\":\"HashCorp\",\"jobTitle\":\"Developer\",\"status\":\"NO_RESPONSE\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}" +
+            "],\"documents\":[" +
+            "{\"manifestDocumentId\":\"DOC-1\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"doc.pdf\",\"filename\":\"doc.pdf\",\"sizeBytes\":12,\"sha256\":\"a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3\",\"manifestApplicationId\":\"APP-1\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}" +
+            "]}";
+
+        Map<String, String> zip1Entries = new HashMap<>();
+        // Modified content (sha differs from manifest expected sha)
+        zip1Entries.put("JobApps/doc.pdf", "corrupted content here");
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(zip1Entries);
+        byte[] driveBytes = createMockZip(new HashMap<>());
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        String responseContent = mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        BulkScanResponse scanRes = objectMapper.readValue(responseContent, BulkScanResponse.class);
+        assertFalse(scanRes.isCanConfirm());
+        assertTrue(scanRes.getValidationIssues().stream()
+                .anyMatch(issue -> issue.contains("size or checksum has changed")));
+    }
+
+    @Test
+    void testUnexpectedDocumentDetection() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":1,\"companies\":1,\"rejected\":0,\"withdrawn\":0,\"noResponse\":1," +
+            "\"sourceFiles\":1,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":1," +
+            "\"filesReadyToAttach\":1,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":1," +
+            "\"primaryCvs\":1,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-1\",\"companyName\":\"UnexpectedCorp\",\"jobTitle\":\"Developer\",\"status\":\"NO_RESPONSE\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}" +
+            "],\"documents\":[" +
+            "{\"manifestDocumentId\":\"DOC-1\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"doc.pdf\",\"filename\":\"doc.pdf\",\"sizeBytes\":12,\"sha256\":\"a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3\",\"manifestApplicationId\":\"APP-1\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}" +
+            "]}";
+
+        Map<String, String> zip1Entries = new HashMap<>();
+        zip1Entries.put("JobApps/doc.pdf", "some content");
+        // Add an extra file in zip that is not in the manifest documents
+        zip1Entries.put("JobApps/extra_unexpected.pdf", "extra content");
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(zip1Entries);
+        byte[] driveBytes = createMockZip(new HashMap<>());
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        String responseContent = mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        BulkScanResponse scanRes = objectMapper.readValue(responseContent, BulkScanResponse.class);
+        assertFalse(scanRes.isCanConfirm());
+        assertTrue(scanRes.getValidationIssues().stream()
+                .anyMatch(issue -> issue.contains("Unexpected file JobApps/extra_unexpected.pdf found in LAPTOP ZIP")));
+    }
+
+    @Test
+    void testForgedOrNonOwnedMatchExistingIdRejection() throws Exception {
+        User otherUser = User.builder()
+                .username("other_user")
+                .passwordHash(passwordEncoder.encode("password123"))
+                .displayName("Other User")
+                .role("ROLE_USER")
+                .enabled(true)
+                .build();
+        otherUser = userRepository.saveAndFlush(otherUser);
+
+        JobApplication otherApp = JobApplication.builder()
+                .companyName("OtherCorp")
+                .jobTitle("Manager")
+                .status(ApplicationStatus.APPLIED)
+                .priority(ApplicationPriority.HIGH)
+                .user(otherUser)
+                .notes("Untouched notes")
+                .build();
+        otherApp = jobApplicationRepository.saveAndFlush(otherApp);
+
+        String scanId = UUID.randomUUID().toString();
+
+        ImportBatch batch = ImportBatch.builder()
+                .id(scanId)
+                .user(testUser)
+                .manifestHash("fakehash")
+                .state("SCANNED")
+                .expiry(java.time.LocalDateTime.now().plusHours(2))
+                .build();
+        importBatchRepository.saveAndFlush(batch);
+
+        String tempAppId = "temp-app-forged";
+        Map<String, Object> mappings = new HashMap<>();
+        mappings.put("shaToTempPath", new HashMap<>());
+        mappings.put("docIdToSha", new HashMap<>());
+        mappings.put("docIdToOrigName", new HashMap<>());
+        mappings.put("hasValidationErrors", false);
+        mappings.put("scannedTempAppIds", List.of(tempAppId));
+        mappings.put("requiredAttachTempDocIds", List.of());
+        mappings.put("unassignedDocIds", List.of());
+
+        Map<String, String> tempAppIdToImportAction = new HashMap<>();
+        tempAppIdToImportAction.put(tempAppId, "MATCH_EXISTING");
+        mappings.put("tempAppIdToImportAction", tempAppIdToImportAction);
+
+        Map<String, Long> tempAppIdToExistingAppId = new HashMap<>();
+        tempAppIdToExistingAppId.put(tempAppId, otherApp.getId());
+        mappings.put("tempAppIdToExistingAppId", tempAppIdToExistingAppId);
+
+        java.nio.file.Path tempDir = java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), "jobtrack-import-" + testUser.getId() + "-" + scanId);
+        java.nio.file.Files.createDirectories(tempDir);
+        java.nio.file.Files.write(tempDir.resolve("mappings.json"), objectMapper.writeValueAsBytes(mappings));
+
+        BulkConfirmApplication appPayload = BulkConfirmApplication.builder()
+                .tempAppId(tempAppId)
+                .companyName("OtherCorp")
+                .jobTitle("Manager")
+                .status("REJECTED")
+                .priority("LOW")
+                .notes("Forged update attempt")
+                .build();
+
+        BulkConfirmRequest request = BulkConfirmRequest.builder()
+                .scanId(scanId)
+                .applications(List.of(appPayload))
+                .build();
+
+        String jsonPayload = objectMapper.writeValueAsString(request);
+        String csrfToken = getCsrfToken(testSession);
+
+        mockMvc.perform(post("/api/bulk-import/confirm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(jsonPayload)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isNotFound()); // ResourceNotFoundException maps to 404
+
+        JobApplication reloaded = jobApplicationRepository.findById(otherApp.getId()).orElseThrow();
+        assertEquals(ApplicationStatus.APPLIED, reloaded.getStatus());
+        assertEquals(ApplicationPriority.HIGH, reloaded.getPriority());
+        assertEquals("Untouched notes", reloaded.getNotes());
+    }
+
+    @Test
+    void testMissingExpectedDocumentDetection() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":1,\"companies\":1,\"rejected\":0,\"withdrawn\":0,\"noResponse\":1," +
+            "\"sourceFiles\":1,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":1," +
+            "\"filesReadyToAttach\":1,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":1," +
+            "\"primaryCvs\":1,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-M1\",\"companyName\":\"MissingDocCorp\",\"jobTitle\":\"Developer\",\"status\":\"NO_RESPONSE\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}" +
+            "],\"documents\":[" +
+            "{\"manifestDocumentId\":\"DOC-M1\",\"sourceArchiveId\":\"LAPTOP\",\"relativePath\":\"missing.pdf\",\"filename\":\"missing.pdf\",\"sizeBytes\":12,\"sha256\":\"a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3\",\"manifestApplicationId\":\"APP-M1\",\"uploadDocumentType\":\"CV\",\"disposition\":\"ATTACH\"}" +
+            "]}";
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        byte[] laptopBytes = createMockZip(new HashMap<>()); // empty zip - missing.pdf is absent
+        byte[] driveBytes = createMockZip(new HashMap<>());
+
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", laptopBytes);
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", driveBytes);
+
+        String csrfToken = getCsrfToken(testSession);
+
+        String responseContent = mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        BulkScanResponse scanRes = objectMapper.readValue(responseContent, BulkScanResponse.class);
+        assertFalse(scanRes.isCanConfirm());
+        assertTrue(scanRes.getValidationIssues().stream()
+                .anyMatch(issue -> issue.contains("is missing from ZIP archives")));
+    }
+
     private String getCsrfToken(MockHttpSession session) throws Exception {
         String response = mockMvc.perform(get("/api/auth/csrf").session(session))
                 .andExpect(status().isOk())

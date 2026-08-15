@@ -888,6 +888,9 @@ public class BulkImportService {
             if (ex instanceof IllegalArgumentException) {
                 throw (IllegalArgumentException) ex;
             }
+            if (ex instanceof ResourceNotFoundException) {
+                throw (ResourceNotFoundException) ex;
+            }
             throw new RuntimeException("Import confirmation failed: " + ex.getMessage(), ex);
         }
     }
