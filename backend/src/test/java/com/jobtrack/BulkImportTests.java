@@ -136,10 +136,11 @@ public class BulkImportTests {
             // 57 REJECTED, 115 NO_RESPONSE. App 1 (Tripadvisor) is NO_RESPONSE, apps 2 to 58 are REJECTED, apps 59 to 172 are NO_RESPONSE
             String status = (i >= 2 && i <= 58) ? "REJECTED" : "NO_RESPONSE";
 
+            String importAction = (i == 1) ? "MATCH_EXISTING" : "CREATE_OR_MATCH_EXACT";
             if (i > 1) appsJson.append(",");
             appsJson.append(String.format(
-                "{\"manifestApplicationId\":\"%s\",\"companyName\":\"%s\",\"jobTitle\":\"%s\",\"status\":\"%s\",\"priority\":\"LOW\",\"dateApplied\":\"2026-08-13\",\"stage\":\"Stage\",\"source\":\"Source\",\"notes\":\"Notes\"}",
-                appId, company, position, status
+                "{\"manifestApplicationId\":\"%s\",\"companyName\":\"%s\",\"jobTitle\":\"%s\",\"status\":\"%s\",\"priority\":\"LOW\",\"dateApplied\":\"2026-08-13\",\"stage\":\"Stage\",\"source\":\"Source\",\"notes\":\"Notes\",\"importAction\":\"%s\"}",
+                appId, company, position, status, importAction
             ));
         }
         appsJson.append("]");
@@ -204,7 +205,12 @@ public class BulkImportTests {
         }
 
         String docsJson = "[" + String.join(",", docJsonList) + "]";
-        String manifestJson = "{\"schemaVersion\":\"1.0\",\"applications\":" + appsJson.toString() + ",\"documents\":" + docsJson + "}";
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":172,\"companies\":172,\"rejected\":57,\"withdrawn\":0,\"noResponse\":115," +
+            "\"sourceFiles\":320,\"exactDuplicateCopiesSkipped\":16,\"uniqueFiles\":304," +
+            "\"filesReadyToAttach\":235,\"uniqueUnassignedFiles\":69,\"applicationsWithAttachedFiles\":85," +
+            "\"primaryCvs\":235,\"primaryCoverLetters\":0" +
+            "},\"applications\":" + appsJson.toString() + ",\"documents\":" + docsJson + "}";
 
         MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "laptop.zip", "application/zip", createMockZip(zip1Entries));
         MockMultipartFile driveZip = new MockMultipartFile("googleDriveZip", "drive.zip", "application/zip", createMockZip(zip2Entries));
@@ -420,7 +426,12 @@ public class BulkImportTests {
         zip2Entries.put("Jobs/.DS_Store", "dummy store content");
 
         String manifestJson = String.format(
-            "{\"applications\":[%s],\"documents\":[%s]}",
+            "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":172,\"companies\":172,\"rejected\":57,\"withdrawn\":0,\"noResponse\":115," +
+            "\"sourceFiles\":320,\"exactDuplicateCopiesSkipped\":16,\"uniqueFiles\":304," +
+            "\"filesReadyToAttach\":235,\"uniqueUnassignedFiles\":69,\"applicationsWithAttachedFiles\":85," +
+            "\"primaryCvs\":235,\"primaryCoverLetters\":0" +
+            "},\"applications\":[%s],\"documents\":[%s]}",
             String.join(",", appJsonList), String.join(",", docJsonList)
         );
 
@@ -523,7 +534,12 @@ public class BulkImportTests {
         }
 
         String manifestJson = String.format(
-            "{\"applications\":[%s],\"documents\":[%s]}",
+            "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":172,\"companies\":172,\"rejected\":57,\"withdrawn\":0,\"noResponse\":115," +
+            "\"sourceFiles\":320,\"exactDuplicateCopiesSkipped\":16,\"uniqueFiles\":304," +
+            "\"filesReadyToAttach\":235,\"uniqueUnassignedFiles\":69,\"applicationsWithAttachedFiles\":85," +
+            "\"primaryCvs\":235,\"primaryCoverLetters\":0" +
+            "},\"applications\":[%s],\"documents\":[%s]}",
             String.join(",", appJsonList), String.join(",", docJsonList)
         );
 
@@ -543,8 +559,178 @@ public class BulkImportTests {
                 .file(googleDriveZip)
                 .session(testSession)
                 .header("X-CSRF-TOKEN", csrfToken))
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void testManifestSummaryCountMismatchFails() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":10,\"companies\":1,\"rejected\":0,\"withdrawn\":0,\"noResponse\":0," +
+            "\"sourceFiles\":0,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":0," +
+            "\"filesReadyToAttach\":0,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":0," +
+            "\"primaryCvs\":0,\"primaryCoverLetters\":0" +
+            "},\"applications\":[],\"documents\":[]}";
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", createMockZip(new HashMap<>()));
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", createMockZip(new HashMap<>()));
+
+        String csrfToken = getCsrfToken(testSession);
+
+        mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testWithdrawnStatusAcceptanceAndTerminalDateClearing() throws Exception {
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":1,\"companies\":1,\"rejected\":0,\"withdrawn\":1,\"noResponse\":0," +
+            "\"sourceFiles\":0,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":0," +
+            "\"filesReadyToAttach\":0,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":0," +
+            "\"primaryCvs\":0,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-W1\",\"companyName\":\"WithdrawnCompany\",\"jobTitle\":\"Software Engineer\",\"status\":\"WITHDRAWN\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\",\"followUpDate\":\"2026-08-20\",\"deadlineDate\":\"2026-08-30\"}" +
+            "],\"documents\":[]}";
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", createMockZip(new HashMap<>()));
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", createMockZip(new HashMap<>()));
+
+        String csrfToken = getCsrfToken(testSession);
+
+        String responseContent = mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        BulkScanResponse scanRes = objectMapper.readValue(responseContent, BulkScanResponse.class);
+        assertEquals(1, scanRes.getApplications().size());
+        assertEquals("WITHDRAWN", scanRes.getApplications().get(0).getStatus());
+
+        // Perform confirmation
+        BulkConfirmRequest confirmRequest = buildFullConfirmRequest(scanRes);
+        String confirmJson = objectMapper.writeValueAsString(confirmRequest);
+
+        mockMvc.perform(post("/api/bulk-import/confirm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmJson)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk());
+
+        // Verify dates are cleared in DB
+        Optional<JobApplication> created = jobApplicationRepository.findByCompanyNameIgnoreCaseAndJobTitleIgnoreCaseAndUserId("WithdrawnCompany", "Software Engineer", testUser.getId());
+        assertTrue(created.isPresent());
+        assertEquals(ApplicationStatus.WITHDRAWN, created.get().getStatus());
+        assertNull(created.get().getFollowUpDate());
+        assertNull(created.get().getDeadlineDate());
+    }
+
+    @Test
+    void testCreateNewAttemptCreatesSeparateRows() throws Exception {
+        // First seed an existing Tripadvisor record
+        JobApplication existingApp = JobApplication.builder()
+                .companyName("Tripadvisor")
+                .jobTitle("Junior Software Engineer")
+                .status(ApplicationStatus.NO_RESPONSE)
+                .priority(ApplicationPriority.MEDIUM)
+                .user(testUser)
+                .build();
+        jobApplicationRepository.saveAndFlush(existingApp);
+
+        String manifestJson = "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":2,\"companies\":1,\"rejected\":1,\"withdrawn\":0,\"noResponse\":1," +
+            "\"sourceFiles\":0,\"exactDuplicateCopiesSkipped\":0,\"uniqueFiles\":0," +
+            "\"filesReadyToAttach\":0,\"uniqueUnassignedFiles\":0,\"applicationsWithAttachedFiles\":0," +
+            "\"primaryCvs\":0,\"primaryCoverLetters\":0" +
+            "},\"applications\":[" +
+            "{\"manifestApplicationId\":\"APP-T2\",\"companyName\":\"Tripadvisor\",\"jobTitle\":\"Junior Software Engineer\",\"status\":\"REJECTED\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}," +
+            "{\"manifestApplicationId\":\"APP-T3\",\"companyName\":\"Tripadvisor\",\"jobTitle\":\"Junior Software Engineer\",\"status\":\"NO_RESPONSE\",\"priority\":\"MEDIUM\",\"importAction\":\"CREATE_NEW_ATTEMPT\"}" +
+            "],\"documents\":[]}";
+
+        byte[] manifestBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
+        MockMultipartFile manifestFile = new MockMultipartFile("manifest", "manifest.json", "application/json", manifestBytes);
+        MockMultipartFile laptopZip = new MockMultipartFile("laptopZip", "JobApps.zip", "application/zip", createMockZip(new HashMap<>()));
+        MockMultipartFile googleDriveZip = new MockMultipartFile("googleDriveZip", "Jobs.zip", "application/zip", createMockZip(new HashMap<>()));
+
+        String csrfToken = getCsrfToken(testSession);
+
+        String responseContent = mockMvc.perform(multipart("/api/bulk-import/scan")
+                .file(manifestFile)
+                .file(laptopZip)
+                .file(googleDriveZip)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        BulkScanResponse scanRes = objectMapper.readValue(responseContent, BulkScanResponse.class);
+        assertEquals(2, scanRes.getApplications().size());
+        assertTrue(scanRes.getApplications().get(0).isDuplicate());
+        assertTrue(scanRes.getApplications().get(1).isDuplicate());
+        assertNull(scanRes.getApplications().get(0).getExistingApplicationId());
+        assertNull(scanRes.getApplications().get(1).getExistingApplicationId());
+
+        // Perform confirmation
+        BulkConfirmRequest confirmRequest = buildFullConfirmRequest(scanRes);
+        String confirmJson = objectMapper.writeValueAsString(confirmRequest);
+
+        mockMvc.perform(post("/api/bulk-import/confirm")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmJson)
+                .session(testSession)
+                .header("X-CSRF-TOKEN", csrfToken))
+                .andExpect(status().isOk());
+
+        // Verify we now have three Tripadvisor records in database
+        List<JobApplication> list = jobApplicationRepository.findAll();
+        long count = list.stream().filter(a -> "Tripadvisor".equalsIgnoreCase(a.getCompanyName())).count();
+        assertEquals(3, count, "Should have exactly three separate records for Tripadvisor (one pre-existing + two new attempts).");
+    }
+
+    private BulkConfirmRequest buildFullConfirmRequest(BulkScanResponse scanRes) {
+        List<BulkConfirmApplication> apps = new ArrayList<>();
+        for (ScannedApplicationGroup app : scanRes.getApplications()) {
+            List<BulkConfirmDocument> docs = new ArrayList<>();
+            if (app.getDocuments() != null) {
+                for (ScannedDocumentPreview doc : app.getDocuments()) {
+                    docs.add(BulkConfirmDocument.builder()
+                            .tempDocId(doc.getTempDocId())
+                            .documentType(doc.getDocumentType())
+                            .build());
+                }
+            }
+            apps.add(BulkConfirmApplication.builder()
+                    .tempAppId(app.getTempAppId())
+                    .companyName(app.getCompanyName())
+                    .jobTitle(app.getJobTitle())
+                    .status(app.getStatus())
+                    .priority(app.getPriority())
+                    .dateApplied(app.getDateApplied())
+                    .stage(app.getStage())
+                    .source(app.getSource())
+                    .notes(app.getNotes())
+                    .documents(docs)
+                    .build());
+        }
+        return BulkConfirmRequest.builder()
+                .scanId(scanRes.getScanId())
+                .applications(apps)
+                .build();
+    }
+
+
 
     private String getCsrfToken(MockHttpSession session) throws Exception {
         String response = mockMvc.perform(get("/api/auth/csrf").session(session))

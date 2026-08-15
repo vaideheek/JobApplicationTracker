@@ -442,7 +442,12 @@ public class BulkImportNonTransactionalTests {
         }
 
         String manifestJson = String.format(
-            "{\"applications\":[%s],\"documents\":[%s]}",
+            "{\"schemaVersion\":\"4.0\",\"summary\":{" +
+            "\"applications\":172,\"companies\":172,\"rejected\":57,\"withdrawn\":0,\"noResponse\":115," +
+            "\"sourceFiles\":320,\"exactDuplicateCopiesSkipped\":16,\"uniqueFiles\":304," +
+            "\"filesReadyToAttach\":235,\"uniqueUnassignedFiles\":69,\"applicationsWithAttachedFiles\":85," +
+            "\"primaryCvs\":235,\"primaryCoverLetters\":0" +
+            "},\"applications\":[%s],\"documents\":[%s]}",
             String.join(",", appJsonList), String.join(",", docJsonList)
         );
 
