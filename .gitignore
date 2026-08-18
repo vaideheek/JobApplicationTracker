@@ -38,3 +38,6 @@ jobtrack-before-auth.sql
 
 # Private Import Data
 /private-import-data/
+
+# Wrangler local files
+frontend/.wrangler/
