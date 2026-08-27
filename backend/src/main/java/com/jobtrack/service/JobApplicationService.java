@@ -6,6 +6,7 @@ import com.jobtrack.dto.StatusHistoryResponse;
 import com.jobtrack.entity.JobApplication;
 import com.jobtrack.entity.StatusHistory;
 import com.jobtrack.entity.User;
+import com.jobtrack.enums.ApplicationPriority;
 import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.exception.ResourceNotFoundException;
 import com.jobtrack.repository.JobApplicationRepository;
@@ -131,10 +132,25 @@ public class JobApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public Page<JobApplicationResponse> getAllApplications(String search, ApplicationStatus status, Pageable pageable) {
+    public Page<JobApplicationResponse> getAllApplications(
+            String search,
+            ApplicationStatus status,
+            ApplicationPriority priority,
+            LocalDate dateFrom,
+            LocalDate dateTo,
+            String documentState,
+            Pageable pageable) {
         User user = currentUserService.getCurrentUser();
-        return jobApplicationRepository.findWithFilters(search, status, user.getId(), pageable)
-                .map(this::mapToResponse);
+        return jobApplicationRepository.findWithFilters(
+                search,
+                status,
+                priority,
+                dateFrom,
+                dateTo,
+                documentState,
+                user.getId(),
+                pageable
+        ).map(this::mapToResponse);
     }
 
     // --- Mapping helpers ---

@@ -2,10 +2,11 @@ package com.jobtrack.controller;
 
 import com.jobtrack.dto.JobApplicationRequest;
 import com.jobtrack.dto.JobApplicationResponse;
-import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.dto.PrioritySuggestionResponse;
-import com.jobtrack.service.PrioritySuggestionService;
+import com.jobtrack.enums.ApplicationPriority;
+import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.service.JobApplicationService;
+import com.jobtrack.service.PrioritySuggestionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -15,6 +16,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.time.LocalDate;
 
 @RestController
 @RequestMapping("/api/applications")
@@ -28,18 +30,46 @@ public class JobApplicationController {
     public ResponseEntity<Page<JobApplicationResponse>> getAllApplications(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) ApplicationStatus status,
+            @RequestParam(required = false) ApplicationPriority priority,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            @RequestParam(required = false) String documentState,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "15") int size,
             @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
 
-        Sort sort = sortDir.equalsIgnoreCase("asc")
-                ? Sort.by(sortBy).ascending()
-                : Sort.by(sortBy).descending();
+        // Validate sortBy against strict allowlist
+        if (!sortBy.equals("lastUpdatedAt") && !sortBy.equals("dateApplied") && !sortBy.equals("createdAt") && !sortBy.equals("companyName")) {
+            throw new IllegalArgumentException("Unsupported sort field: " + sortBy);
+        }
+
+        // Validate sortDir
+        if (!sortDir.equalsIgnoreCase("asc") && !sortDir.equalsIgnoreCase("desc")) {
+            throw new IllegalArgumentException("Unsupported sort direction: " + sortDir);
+        }
+
+        // Validate size against strict supported values (15, 25, 50, 100)
+        if (size != 15 && size != 25 && size != 50 && size != 100) {
+            throw new IllegalArgumentException("Unsupported page size: " + size);
+        }
+
+        // Normalize negative page numbers
+        if (page < 0) {
+            page = 0;
+        }
+
+        // Setup deterministic secondary sort (id DESC)
+        Sort.Order primaryOrder = sortDir.equalsIgnoreCase("asc")
+                ? Sort.Order.asc(sortBy).nullsLast()
+                : Sort.Order.desc(sortBy).nullsLast();
+        Sort.Order secondaryOrder = Sort.Order.desc("id");
+        Sort sort = Sort.by(primaryOrder, secondaryOrder);
+
         Pageable pageable = PageRequest.of(page, size, sort);
 
         Page<JobApplicationResponse> applications = jobApplicationService
-                .getAllApplications(search, status, pageable);
+                .getAllApplications(search, status, priority, dateFrom, dateTo, documentState, pageable);
         return ResponseEntity.ok(applications);
     }
 
