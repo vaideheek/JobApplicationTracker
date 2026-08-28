@@ -74,12 +74,23 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
            "j.user.id = :userId AND " +
            "(:search IS NULL OR :search = '' OR " +
            " LOWER(j.companyName) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
-           " LOWER(j.jobTitle) LIKE LOWER(CONCAT('%', :search, '%'))) " +
+           " LOWER(j.jobTitle) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           " LOWER(j.location) LIKE LOWER(CONCAT('%', :search, '%')) OR " +
+           " LOWER(j.source) LIKE LOWER(CONCAT('%', :search, '%'))) " +
            "AND (:status IS NULL OR j.status = :status) " +
-           "ORDER BY j.lastUpdatedAt DESC")
+           "AND (:priority IS NULL OR j.priority = :priority) " +
+           "AND (:dateFrom IS NULL OR j.dateApplied >= :dateFrom) " +
+           "AND (:dateTo IS NULL OR j.dateApplied <= :dateTo) " +
+           "AND (:documentState IS NULL OR :documentState = '' OR " +
+           "      (:documentState = 'HAS_DOCUMENTS' AND j.documents IS NOT EMPTY) OR " +
+           "      (:documentState = 'NO_DOCUMENTS' AND j.documents IS EMPTY))")
     Page<JobApplication> findWithFilters(
             @Param("search") String search,
             @Param("status") ApplicationStatus status,
+            @Param("priority") ApplicationPriority priority,
+            @Param("dateFrom") LocalDate dateFrom,
+            @Param("dateTo") LocalDate dateTo,
+            @Param("documentState") String documentState,
             @Param("userId") Long userId,
             Pageable pageable);
 

@@ -25,7 +25,13 @@ export const jobApplicationApi = {
   // Applications CRUD
   getAll: async (params?: {
     search?: string;
-    status?: ApplicationStatus;
+    status?: string;
+    priority?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    documentState?: string;
+    sortBy?: string;
+    sortDir?: string;
     page?: number;
     size?: number;
   }): Promise<PageResponse<JobApplication>> => {

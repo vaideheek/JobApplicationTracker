@@ -1,13 +1,23 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Plus, Eye, Edit, Trash2, ChevronLeft, ChevronRight } from 'lucide-react';
+import {
+  Plus,
+  Eye,
+  Edit,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import SearchFilter from '../components/SearchFilter';
 import StatusBadge from '../components/StatusBadge';
 import DeleteModal from '../components/DeleteModal';
 import { jobApplicationApi } from '../api/jobApplicationApi';
 import { format } from 'date-fns';
-import type { JobApplication, ApplicationStatus, PageResponse } from '../types';
+import type { JobApplication, PageResponse } from '../types';
 
 export default function ApplicationsList() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -17,9 +27,42 @@ export default function ApplicationsList() {
   const { user } = useAuth();
   const isDemo = user?.demoAccount || false;
 
+  // Extract query parameters with sensible defaults
   const search = searchParams.get('search') || '';
-  const statusFilter = (searchParams.get('status') || '') as ApplicationStatus | '';
-  const page = parseInt(searchParams.get('page') || '0', 10);
+  const statusFilter = searchParams.get('status') || '';
+  const priorityFilter = searchParams.get('priority') || '';
+  const dateFrom = searchParams.get('dateFrom') || '';
+  const dateTo = searchParams.get('dateTo') || '';
+  const documentState = searchParams.get('documentState') || '';
+  const sortBy = searchParams.get('sortBy') || 'lastUpdatedAt';
+  const sortDir = searchParams.get('sortDir') || 'desc';
+  const page = Math.max(0, parseInt(searchParams.get('page') || '0', 10));
+  const size = parseInt(searchParams.get('size') || '15', 10);
+
+  // Local state for debounced search input
+  const [localSearch, setLocalSearch] = useState(search);
+
+  // Synchronize local search input with URL search state (e.g. browser Back/Forward navigation)
+  useEffect(() => {
+    setLocalSearch(search);
+  }, [search]);
+
+  // Debounced search trigger: localSearch -> searchParams
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (localSearch !== search) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          if (localSearch) next.set('search', localSearch);
+          else next.delete('search');
+          next.set('page', '0');
+          return next;
+        });
+      }
+    }, 350);
+
+    return () => clearTimeout(handler);
+  }, [localSearch, search, setSearchParams]);
 
   const fetchApplications = useCallback(async () => {
     setLoading(true);
@@ -27,47 +70,88 @@ export default function ApplicationsList() {
       const result = await jobApplicationApi.getAll({
         search: search || undefined,
         status: statusFilter || undefined,
+        priority: priorityFilter || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        documentState: documentState || undefined,
+        sortBy,
+        sortDir,
         page,
-        size: 15,
+        size,
       });
+
+      // Handle invalid page out-of-bounds correction
+      if (result.totalPages === 0 && page > 0) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('page', '0');
+          return next;
+        });
+        return;
+      }
+
+      if (result.totalPages > 0 && page >= result.totalPages) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('page', String(result.totalPages - 1));
+          return next;
+        });
+        return;
+      }
+
       setData(result);
     } catch (err) {
       console.error('Failed to fetch applications:', err);
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, page]);
+  }, [search, statusFilter, priorityFilter, dateFrom, dateTo, documentState, sortBy, sortDir, page, size, setSearchParams]);
 
   useEffect(() => {
     fetchApplications();
   }, [fetchApplications]);
 
-  const handleSearchChange = (value: string) => {
+  // Helper to set individual query parameters
+  const updateQueryParam = (key: string, value: string | null, resetPage = true) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      if (value) next.set('search', value);
-      else next.delete('search');
+      if (value) next.set(key, value);
+      else next.delete(key);
+      if (resetPage) next.set('page', '0');
+      return next;
+    });
+  };
+
+  const handleClearFilters = () => {
+    setLocalSearch('');
+    setSearchParams(new URLSearchParams());
+  };
+
+  const handleHeaderSort = (field: string) => {
+    let nextDir = 'desc';
+    if (sortBy === field) {
+      nextDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      nextDir = field === 'companyName' ? 'asc' : 'desc';
+    }
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('sortBy', field);
+      next.set('sortDir', nextDir);
       next.set('page', '0');
       return next;
     });
   };
 
-  const handleStatusChange = (value: ApplicationStatus | '') => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (value) next.set('status', value);
-      else next.delete('status');
-      next.set('page', '0');
-      return next;
-    });
-  };
-
-  const handlePageChange = (newPage: number) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      next.set('page', String(newPage));
-      return next;
-    });
+  const renderSortIcon = (field: string) => {
+    if (sortBy !== field) {
+      return <ChevronsUpDown size={14} className="ml-1 inline-block text-slate-400" />;
+    }
+    return sortDir === 'asc' ? (
+      <ChevronUp size={14} className="ml-1 inline-block text-brand-600 font-bold" />
+    ) : (
+      <ChevronDown size={14} className="ml-1 inline-block text-brand-600 font-bold" />
+    );
   };
 
   const handleDelete = async () => {
@@ -81,13 +165,48 @@ export default function ApplicationsList() {
     }
   };
 
+  // Compact pagination calculation
+  const getPages = () => {
+    if (!data) return [];
+    const total = data.totalPages;
+    const current = page;
+    const pages: (number | string)[] = [];
+
+    if (total <= 7) {
+      for (let i = 0; i < total; i++) {
+        pages.push(i);
+      }
+    } else {
+      pages.push(0);
+      if (current > 2) {
+        pages.push('ellipsis-start');
+      }
+
+      const start = Math.max(1, current - 1);
+      const end = Math.min(total - 2, current + 1);
+
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (current < total - 3) {
+        pages.push('ellipsis-end');
+      }
+      pages.push(total - 1);
+    }
+    return pages;
+  };
+
+  const showingStart = data && data.totalElements > 0 ? page * size + 1 : 0;
+  const showingEnd = data ? Math.min((page + 1) * size, data.totalElements) : 0;
+
   return (
     <div>
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Applications</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {data ? `${data.totalElements} total applications` : 'Loading...'}
+            {data ? `Showing ${showingStart}-${showingEnd} of ${data.totalElements} applications` : 'Loading...'}
           </p>
         </div>
         {!isDemo && (
@@ -101,17 +220,32 @@ export default function ApplicationsList() {
         )}
       </div>
 
-      {/* Filters */}
+      {/* Filters Panel */}
       <div className="mb-6">
         <SearchFilter
-          search={search}
+          search={localSearch}
           statusFilter={statusFilter}
-          onSearchChange={handleSearchChange}
-          onStatusChange={handleStatusChange}
+          priorityFilter={priorityFilter}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          documentState={documentState}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          size={size}
+          onSearchChange={setLocalSearch}
+          onStatusChange={(val) => updateQueryParam('status', val)}
+          onPriorityChange={(val) => updateQueryParam('priority', val)}
+          onDateFromChange={(val) => updateQueryParam('dateFrom', val)}
+          onDateToChange={(val) => updateQueryParam('dateTo', val)}
+          onDocumentStateChange={(val) => updateQueryParam('documentState', val)}
+          onSortByChange={(val) => updateQueryParam('sortBy', val)}
+          onSortDirChange={(val) => updateQueryParam('sortDir', val)}
+          onSizeChange={(val) => updateQueryParam('size', String(val))}
+          onClearFilters={handleClearFilters}
         />
       </div>
 
-      {/* Table */}
+      {/* Applications Table */}
       <div className="rounded-xl border border-slate-200 bg-white">
         {loading ? (
           <div className="flex h-48 items-center justify-center">
@@ -127,11 +261,21 @@ export default function ApplicationsList() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-100 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
-                    <th className="px-6 py-3">Company</th>
+                    <th
+                      onClick={() => handleHeaderSort('companyName')}
+                      className="cursor-pointer select-none px-6 py-3 hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      Company {renderSortIcon('companyName')}
+                    </th>
                     <th className="px-6 py-3">Role</th>
                     <th className="px-6 py-3">Location</th>
                     <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3">Applied</th>
+                    <th
+                      onClick={() => handleHeaderSort('dateApplied')}
+                      className="cursor-pointer select-none px-6 py-3 hover:bg-slate-50 hover:text-slate-700"
+                    >
+                      Applied {renderSortIcon('dateApplied')}
+                    </th>
                     <th className="px-6 py-3">Priority</th>
                     <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
@@ -206,30 +350,79 @@ export default function ApplicationsList() {
               </table>
             </div>
 
-            {/* Pagination */}
-            {data.totalPages > 1 && (
-              <div className="flex items-center justify-between border-t border-slate-100 px-6 py-3">
-                <p className="text-sm text-slate-500">
-                  Page {data.number + 1} of {data.totalPages}
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handlePageChange(page - 1)}
-                    disabled={data.first}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    <ChevronLeft size={16} /> Prev
-                  </button>
-                  <button
-                    onClick={() => handlePageChange(page + 1)}
-                    disabled={data.last}
-                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40"
-                  >
-                    Next <ChevronRight size={16} />
-                  </button>
-                </div>
+            {/* Pagination Controls */}
+            <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-100 px-6 py-4 sm:flex-row">
+              <p className="text-sm text-slate-500">
+                Showing {showingStart}-{showingEnd} of {data.totalElements} applications
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {/* First */}
+                <button
+                  type="button"
+                  onClick={() => updateQueryParam('page', '0', false)}
+                  disabled={data.first}
+                  className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  First
+                </button>
+
+                {/* Prev */}
+                <button
+                  type="button"
+                  onClick={() => updateQueryParam('page', String(page - 1), false)}
+                  disabled={data.first}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  <ChevronLeft size={14} /> Prev
+                </button>
+
+                {/* Page Numbers */}
+                {getPages().map((p, idx) => {
+                  if (p === 'ellipsis-start' || p === 'ellipsis-end') {
+                    return (
+                      <span key={`ellipsis-${idx}`} className="px-2 text-slate-400 text-sm">
+                        ...
+                      </span>
+                    );
+                  }
+                  const isCurrent = p === page;
+                  return (
+                    <button
+                      key={`page-${p}`}
+                      type="button"
+                      onClick={() => updateQueryParam('page', String(p), false)}
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg text-xs font-medium border ${
+                        isCurrent
+                          ? 'border-brand-600 bg-brand-600 text-white font-bold'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {Number(p) + 1}
+                    </button>
+                  );
+                })}
+
+                {/* Next */}
+                <button
+                  type="button"
+                  onClick={() => updateQueryParam('page', String(page + 1), false)}
+                  disabled={data.last}
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  Next <ChevronRight size={14} />
+                </button>
+
+                {/* Last */}
+                <button
+                  type="button"
+                  onClick={() => updateQueryParam('page', String(data.totalPages - 1), false)}
+                  disabled={data.last}
+                  className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white"
+                >
+                  Last
+                </button>
               </div>
-            )}
+            </div>
           </>
         )}
       </div>
