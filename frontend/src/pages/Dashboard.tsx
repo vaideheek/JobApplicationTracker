@@ -27,20 +27,46 @@ export default function Dashboard() {
   const [insights, setInsights] = useState<DashboardInsightsResponse | null>(null);
   const [recent, setRecent] = useState<JobApplication[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statsFailed, setStatsFailed] = useState(false);
+  const [insightsFailed, setInsightsFailed] = useState(false);
+  const [recentFailed, setRecentFailed] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsData, insightsData, appsData] = await Promise.all([
+        const [statsResult, insightsResult, appsResult] = await Promise.allSettled([
           jobApplicationApi.getStats(),
           jobApplicationApi.getInsights(),
-          jobApplicationApi.getAll({ page: 0, size: 5 }),
+          jobApplicationApi.getAll({
+            page: 0,
+            size: 15,
+            sortBy: 'lastUpdatedAt',
+            sortDir: 'desc',
+          }),
         ]);
-        setStats(statsData);
-        setInsights(insightsData);
-        setRecent(appsData.content);
+
+        if (statsResult.status === 'fulfilled') {
+          setStats(statsResult.value);
+        } else {
+          setStatsFailed(true);
+          console.error('Failed to fetch dashboard stats');
+        }
+
+        if (insightsResult.status === 'fulfilled') {
+          setInsights(insightsResult.value);
+        } else {
+          setInsightsFailed(true);
+          console.error('Failed to fetch dashboard insights');
+        }
+
+        if (appsResult.status === 'fulfilled') {
+          setRecent((appsResult.value.content || []).slice(0, 5));
+        } else {
+          setRecentFailed(true);
+          console.error('Failed to fetch recent applications');
+        }
       } catch (err) {
-        console.error('Failed to fetch dashboard data:', err);
+        console.error('Failed to fetch dashboard data');
       } finally {
         setLoading(false);
       }
@@ -69,31 +95,31 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           label="Total Applications"
-          value={stats?.totalApplications ?? 0}
+          value={statsFailed ? '—' : (stats?.totalApplications ?? 0)}
           icon={Briefcase}
           color="bg-brand-100 text-brand-600"
         />
         <StatCard
           label="Interviews"
-          value={stats?.interviews ?? 0}
+          value={statsFailed ? '—' : (stats?.interviews ?? 0)}
           icon={Users}
           color="bg-cyan-100 text-cyan-600"
         />
         <StatCard
           label="Offers"
-          value={stats?.offers ?? 0}
+          value={statsFailed ? '—' : (stats?.offers ?? 0)}
           icon={Trophy}
           color="bg-emerald-100 text-emerald-600"
         />
         <StatCard
           label="Rejected"
-          value={stats?.rejections ?? 0}
+          value={statsFailed ? '—' : (stats?.rejections ?? 0)}
           icon={XCircle}
           color="bg-red-100 text-red-600"
         />
         <StatCard
           label="This Week"
-          value={stats?.applicationsThisWeek ?? 0}
+          value={statsFailed ? '—' : (stats?.applicationsThisWeek ?? 0)}
           icon={CalendarDays}
           color="bg-amber-100 text-amber-600"
         />
@@ -103,31 +129,31 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <StatCard
           label="High Priority"
-          value={insights?.highPriorityCount ?? 0}
+          value={insightsFailed ? '—' : (insights?.highPriorityCount ?? 0)}
           icon={AlertTriangle}
           color="bg-rose-100 text-rose-600"
         />
         <StatCard
           label="Follow-ups Needed"
-          value={insights?.followUpNeededCount ?? 0}
+          value={insightsFailed ? '—' : (insights?.followUpNeededCount ?? 0)}
           icon={Clock}
           color="bg-indigo-100 text-indigo-600"
         />
         <StatCard
           label="Upcoming Interviews"
-          value={insights?.upcomingInterviewsCount ?? 0}
+          value={insightsFailed ? '—' : (insights?.upcomingInterviewsCount ?? 0)}
           icon={CalendarDays}
           color="bg-violet-100 text-violet-600"
         />
         <StatCard
           label="Stale (14+ Days)"
-          value={insights?.staleApplicationsCount ?? 0}
+          value={insightsFailed ? '—' : (insights?.staleApplicationsCount ?? 0)}
           icon={Hourglass}
           color="bg-slate-100 text-slate-600"
         />
         <StatCard
           label="Missing Documents"
-          value={insights?.missingDocumentsCount ?? 0}
+          value={insightsFailed ? '—' : (insights?.missingDocumentsCount ?? 0)}
           icon={FileWarning}
           color="bg-amber-100 text-amber-600"
         />
@@ -147,7 +173,12 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          {recent.length === 0 ? (
+          {recentFailed ? (
+            <div className="px-6 py-12 text-center">
+              <FileWarning size={40} className="mx-auto text-slate-300" />
+              <p className="mt-3 text-sm text-slate-500">Recent applications unavailable.</p>
+            </div>
+          ) : recent.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <Briefcase size={40} className="mx-auto text-slate-300" />
               <p className="mt-3 text-sm text-slate-500">No applications yet.</p>
@@ -209,7 +240,12 @@ export default function Dashboard() {
           </div>
           
           <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-            {!insights?.recommendedActions || insights.recommendedActions.length === 0 ? (
+            {insightsFailed ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center h-full">
+                <FileWarning size={36} className="text-slate-400 mb-2" />
+                <p className="text-sm font-semibold text-slate-800">Recommendations unavailable</p>
+              </div>
+            ) : !insights?.recommendedActions || insights.recommendedActions.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center h-full">
                 <CheckCircle2 size={36} className="text-emerald-500 mb-2" />
                 <p className="text-sm font-semibold text-slate-800">All caught up!</p>
@@ -273,13 +309,15 @@ export default function Dashboard() {
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
                 <span className="font-semibold text-slate-700">Response Rate</span>
-                <span className="font-bold text-brand-700">{insights?.responseRate ? insights.responseRate.toFixed(1) : '0.0'}%</span>
+                <span className="font-bold text-brand-700">
+                  {insightsFailed ? '—' : `${(insights?.responseRate ?? 0).toFixed(1)}%`}
+                </span>
               </div>
               <p className="text-xs text-slate-400 mb-2">Applications progressing past review / applied (excluding in-review)</p>
               <div className="w-full bg-slate-100 rounded-full h-2.5">
                 <div 
                   className="bg-brand-600 h-2.5 rounded-full transition-all duration-500" 
-                  style={{ width: `${insights?.responseRate ?? 0}%` }}
+                  style={{ width: `${insightsFailed ? 0 : (insights?.responseRate ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -288,13 +326,15 @@ export default function Dashboard() {
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
                 <span className="font-semibold text-slate-700">Interview Conversion Rate</span>
-                <span className="font-bold text-cyan-700">{insights?.interviewConversionRate ? insights.interviewConversionRate.toFixed(1) : '0.0'}%</span>
+                <span className="font-bold text-cyan-700">
+                  {insightsFailed ? '—' : `${(insights?.interviewConversionRate ?? 0).toFixed(1)}%`}
+                </span>
               </div>
               <p className="text-xs text-slate-400 mb-2">Percentage of applications that reach interview stage</p>
               <div className="w-full bg-slate-100 rounded-full h-2.5">
                 <div 
                   className="bg-cyan-500 h-2.5 rounded-full transition-all duration-500" 
-                  style={{ width: `${insights?.interviewConversionRate ?? 0}%` }}
+                  style={{ width: `${insightsFailed ? 0 : (insights?.interviewConversionRate ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -303,13 +343,15 @@ export default function Dashboard() {
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
                 <span className="font-semibold text-slate-700">Offer Conversion Rate</span>
-                <span className="font-bold text-emerald-700">{insights?.offerConversionRate ? insights.offerConversionRate.toFixed(1) : '0.0'}%</span>
+                <span className="font-bold text-emerald-700">
+                  {insightsFailed ? '—' : `${(insights?.offerConversionRate ?? 0).toFixed(1)}%`}
+                </span>
               </div>
               <p className="text-xs text-slate-400 mb-2">Percentage of applications resulting in offers</p>
               <div className="w-full bg-slate-100 rounded-full h-2.5">
                 <div 
                   className="bg-emerald-500 h-2.5 rounded-full transition-all duration-500" 
-                  style={{ width: `${insights?.offerConversionRate ?? 0}%` }}
+                  style={{ width: `${insightsFailed ? 0 : (insights?.offerConversionRate ?? 0)}%` }}
                 />
               </div>
             </div>
@@ -324,7 +366,11 @@ export default function Dashboard() {
           </div>
           
           <div className="flex-1 flex flex-col justify-center space-y-4 overflow-y-auto">
-            {!insights?.topCompanies || insights.topCompanies.length === 0 ? (
+            {insightsFailed ? (
+              <div className="text-center py-12 text-slate-400 text-sm h-full flex items-center justify-center">
+                Top companies data unavailable.
+              </div>
+            ) : !insights?.topCompanies || insights.topCompanies.length === 0 ? (
               <div className="text-center py-12 text-slate-400 text-sm h-full flex items-center justify-center">
                 No company data available yet.
               </div>
