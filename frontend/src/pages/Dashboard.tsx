@@ -19,12 +19,12 @@ import {
   MessageSquare,
   Activity,
   Layers,
-  Info,
 } from 'lucide-react';
 import StatCard, { StatComparison } from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
 import PeriodSelector from '../components/PeriodSelector';
 import ApplicationsVolumeChart from '../components/ApplicationsVolumeChart';
+import InfoTooltip from '../components/InfoTooltip';
 import { jobApplicationApi } from '../api/jobApplicationApi';
 import { format } from 'date-fns';
 import type {
@@ -252,13 +252,18 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold text-slate-900">Period Performance</h2>
-            <span
-              title="Event metrics reflect logged user and employer activity. Synthetic bulk-import history entries are excluded."
-              className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 cursor-help border border-slate-200"
-            >
-              <Info size={12} className="text-slate-400" />
+            <InfoTooltip
+              title="Period Performance"
+              content="Historical application activity recorded within the selected date range."
+            />
+            <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 border border-slate-200">
               <span>Organic Activity Only</span>
-            </span>
+              <InfoTooltip
+                title="Organic Activity Only"
+                content="For status-event metrics, synthetic bulk-import history and same-status audit entries are excluded, and historical transition dates are not inferred. Applications Submitted uses the recorded application date."
+                size={11}
+              />
+            </div>
           </div>
           {periodLoading && (
             <span className="text-xs text-slate-400 animate-pulse">Updating metrics...</span>
@@ -278,7 +283,7 @@ export default function Dashboard() {
               color="bg-brand-100 text-brand-600"
               to={submittedDrilldownUrl}
               comparison={getComparison(cur?.applicationsSubmitted, prev?.applicationsSubmitted)}
-              tooltip="Total applications submitted during this period. Click to view."
+              tooltip="Applications whose recorded application date falls within the selected period. All Time also includes applications without a recorded application date, although undated applications cannot be plotted on the timeline."
             />
             <StatCard
               label="Responses Recorded"
@@ -286,7 +291,7 @@ export default function Dashboard() {
               icon={MessageSquare}
               color="bg-emerald-100 text-emerald-600"
               comparison={getComparison(cur?.responsesRecorded, prev?.responsesRecorded)}
-              tooltip="Distinct applications receiving an employer response during this period. Excludes bulk import history."
+              tooltip="Distinct applications with an eligible recorded status event to In Review, Assessment, Interview, Offer, or Rejected during the selected period. Synthetic bulk-import and same-status audit entries are excluded."
             />
             <StatCard
               label="Reached Assessment"
@@ -294,7 +299,7 @@ export default function Dashboard() {
               icon={Award}
               color="bg-purple-100 text-purple-600"
               comparison={getComparison(cur?.assessmentsReached, prev?.assessmentsReached)}
-              tooltip="Applications that advanced to Assessment stage during this period. Excludes bulk import history."
+              tooltip="Distinct applications recorded as reaching Assessment during the selected period. This means the stage was recorded, not that an assessment was completed. Synthetic bulk-import and same-status audit entries are excluded."
             />
             <StatCard
               label="Reached Interview"
@@ -302,7 +307,7 @@ export default function Dashboard() {
               icon={Users}
               color="bg-cyan-100 text-cyan-600"
               comparison={getComparison(cur?.interviewsReached, prev?.interviewsReached)}
-              tooltip="Applications that advanced to Interview stage during this period. Excludes bulk import history."
+              tooltip="Distinct applications recorded as reaching Interview during the selected period. Synthetic bulk-import and same-status audit entries are excluded."
             />
             <StatCard
               label="Offers Received"
@@ -310,7 +315,7 @@ export default function Dashboard() {
               icon={Trophy}
               color="bg-amber-100 text-amber-600"
               comparison={getComparison(cur?.offersReached, prev?.offersReached)}
-              tooltip="Offers recorded during this period. Excludes bulk import history."
+              tooltip="Distinct applications with an Offer status event recorded during the selected period. Synthetic bulk-import and same-status audit entries are excluded."
             />
             <StatCard
               label="Rejections"
@@ -318,7 +323,7 @@ export default function Dashboard() {
               icon={XCircle}
               color="bg-rose-100 text-rose-600"
               comparison={getComparison(cur?.rejectionsRecorded, prev?.rejectionsRecorded, true)}
-              tooltip="Rejections recorded during this period. Excludes bulk import history."
+              tooltip="Distinct applications with a Rejected status event recorded during the selected period. Synthetic bulk-import and same-status audit entries are excluded."
             />
           </div>
         )}
@@ -338,6 +343,10 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             <Layers size={18} className="text-brand-600" />
             <h2 className="text-base font-semibold text-slate-900">Current Pipeline</h2>
+            <InfoTooltip
+              title="Current Pipeline"
+              content="Current application-status snapshot across all tracked applications. This does not change when the Period Performance range changes."
+            />
           </div>
           <p className="mt-0.5 text-xs text-slate-500">
             Real-time status breakdown across all tracked applications
@@ -351,6 +360,7 @@ export default function Dashboard() {
             icon={Activity}
             color="bg-brand-50 text-brand-700"
             subtext="In active process"
+            tooltip="Applications currently in Applied, In Review, Assessment, Interview, or Offer. No Response, Rejected, and Withdrawn are excluded."
           />
           <StatCard
             label="Applied"
@@ -358,6 +368,7 @@ export default function Dashboard() {
             icon={Send}
             color="bg-blue-50 text-blue-700"
             to="/applications?status=APPLIED"
+            tooltip="Applications whose current status is Applied."
           />
           <StatCard
             label="In Review"
@@ -365,6 +376,7 @@ export default function Dashboard() {
             icon={Clock}
             color="bg-amber-50 text-amber-700"
             to="/applications?status=IN_REVIEW"
+            tooltip="Applications whose current status is In Review."
           />
           <StatCard
             label="Assessment"
@@ -372,6 +384,7 @@ export default function Dashboard() {
             icon={Award}
             color="bg-purple-50 text-purple-700"
             to="/applications?status=ASSESSMENT"
+            tooltip="Applications whose current status is Assessment."
           />
           <StatCard
             label="Interview"
@@ -379,6 +392,7 @@ export default function Dashboard() {
             icon={Users}
             color="bg-cyan-50 text-cyan-700"
             to="/applications?status=INTERVIEW"
+            tooltip="Applications whose current status is Interview."
           />
           <StatCard
             label="Offer"
@@ -386,6 +400,7 @@ export default function Dashboard() {
             icon={Trophy}
             color="bg-emerald-50 text-emerald-700"
             to="/applications?status=OFFER"
+            tooltip="Applications whose current status is Offer."
           />
           <StatCard
             label="No Response"
@@ -393,14 +408,19 @@ export default function Dashboard() {
             icon={Hourglass}
             color="bg-slate-50 text-slate-600"
             to="/applications?status=NO_RESPONSE"
+            tooltip="Applications whose current status is No Response."
           />
         </div>
       </div>
 
       {/* 5. Insights & Action Cards */}
       <div>
-        <div className="mb-3">
+        <div className="mb-3 flex items-center gap-2">
           <h2 className="text-base font-semibold text-slate-900">Attention & Insights</h2>
+          <InfoTooltip
+            title="Attention & Insights"
+            content="Applications requiring immediate action, follow-up, or missing information."
+          />
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard
@@ -409,32 +429,35 @@ export default function Dashboard() {
             icon={AlertTriangle}
             color="bg-rose-100 text-rose-600"
             to="/applications?priority=HIGH"
-            tooltip="Click to view all High Priority applications"
+            tooltip="All tracked applications currently marked High Priority."
           />
           <StatCard
             label="Follow-ups Needed"
             value={insightsFailed ? '—' : (insights?.followUpNeededCount ?? 0)}
             icon={Clock}
             color="bg-indigo-100 text-indigo-600"
+            tooltip="Applications in Applied, In Review, Assessment, or Interview whose follow-up date is today or overdue."
           />
           <StatCard
             label="Upcoming Interviews"
             value={insightsFailed ? '—' : (insights?.upcomingInterviewsCount ?? 0)}
             icon={CalendarDays}
             color="bg-violet-100 text-violet-600"
+            tooltip="Applications currently in Interview with a follow-up/interview date from today through the next 14 days."
           />
           <StatCard
             label="Stale (14+ Days)"
             value={insightsFailed ? '—' : (insights?.staleApplicationsCount ?? 0)}
             icon={Hourglass}
             color="bg-slate-100 text-slate-600"
+            tooltip="Applications in Applied, In Review, Assessment, or Interview with no recorded update for at least 14 days."
           />
           <StatCard
             label="Missing Documents"
             value={insightsFailed ? '—' : (insights?.missingDocumentsCount ?? 0)}
             icon={FileWarning}
             color="bg-amber-100 text-amber-600"
-            tooltip="Active applications missing a CV or cover letter"
+            tooltip="Applications in Applied, In Review, Assessment, or Interview that are missing a CV or a cover letter."
           />
         </div>
       </div>
@@ -444,7 +467,13 @@ export default function Dashboard() {
         {/* Left: Recent Applications */}
         <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">Recent Applications</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-900">Recent Applications</h2>
+              <InfoTooltip
+                title="Recent Applications"
+                content="Most recently updated applications across your portfolio."
+              />
+            </div>
             <Link
               to="/applications"
               className="flex items-center gap-1 text-sm font-medium text-brand-600 hover:text-brand-700"
@@ -514,9 +543,15 @@ export default function Dashboard() {
 
         {/* Right: Recommended Actions */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 flex flex-col h-[380px] shadow-sm">
-          <div className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Bell size={20} className="text-brand-600" />
-            <h2 className="text-lg font-semibold text-slate-900">Recommended Actions</h2>
+          <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <Bell size={20} className="text-brand-600" />
+              <h2 className="text-lg font-semibold text-slate-900">Recommended Actions</h2>
+              <InfoTooltip
+                title="Recommended Actions"
+                content="Prioritized tasks and reminders based on upcoming dates and application status."
+              />
+            </div>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto pr-1">
@@ -602,16 +637,28 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* Analytics Panel */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <TrendingUp size={20} className="text-brand-600" />
-            <h2 className="text-lg font-semibold text-slate-900">Application Analytics</h2>
+          <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={20} className="text-brand-600" />
+              <h2 className="text-lg font-semibold text-slate-900">Application Analytics</h2>
+              <InfoTooltip
+                title="Application Analytics"
+                content="All-time response and conversion metrics across tracked applications. These do not change with the Period Performance selector."
+              />
+            </div>
           </div>
 
           <div className="space-y-5">
             {/* Response Rate */}
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
-                <span className="font-semibold text-slate-700">Response Rate</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-700">Response Rate</span>
+                  <InfoTooltip
+                    title="Response Rate"
+                    content="Current-state ratio of applications in Assessment, Interview, Offer, or Rejected to all tracked applications. This is an all-time dashboard ratio, not the selected-period Responses Recorded metric."
+                  />
+                </div>
                 <span className="font-bold text-brand-700">
                   {insightsFailed ? '—' : `${(insights?.responseRate ?? 0).toFixed(1)}%`}
                 </span>
@@ -630,7 +677,13 @@ export default function Dashboard() {
             {/* Interview Conversion Rate */}
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
-                <span className="font-semibold text-slate-700">Interview Conversion Rate</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-700">Interview Conversion Rate</span>
+                  <InfoTooltip
+                    title="Interview Conversion Rate"
+                    content="Percentage of all tracked applications with recorded status history showing that they reached Interview. This is an all-time metric and does not change with the selected period."
+                  />
+                </div>
                 <span className="font-bold text-cyan-700">
                   {insightsFailed ? '—' : `${(insights?.interviewConversionRate ?? 0).toFixed(1)}%`}
                 </span>
@@ -651,7 +704,13 @@ export default function Dashboard() {
             {/* Offer Conversion Rate */}
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
-                <span className="font-semibold text-slate-700">Offer Conversion Rate</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-700">Offer Conversion Rate</span>
+                  <InfoTooltip
+                    title="Offer Conversion Rate"
+                    content="Percentage of all tracked applications with recorded status history showing that they reached Offer. This is an all-time metric and does not change with the selected period."
+                  />
+                </div>
                 <span className="font-bold text-emerald-700">
                   {insightsFailed ? '—' : `${(insights?.offerConversionRate ?? 0).toFixed(1)}%`}
                 </span>
@@ -673,9 +732,15 @@ export default function Dashboard() {
 
         {/* Top Companies */}
         <div className="rounded-xl border border-slate-200 bg-white p-6 flex flex-col h-[320px] shadow-sm">
-          <div className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Briefcase size={20} className="text-brand-600" />
-            <h2 className="text-lg font-semibold text-slate-900">Top Companies Applied To</h2>
+          <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-2">
+              <Briefcase size={20} className="text-brand-600" />
+              <h2 className="text-lg font-semibold text-slate-900">Top Companies Applied To</h2>
+              <InfoTooltip
+                title="Top Companies"
+                content="Organizations where you have submitted the highest number of applications."
+              />
+            </div>
           </div>
 
           <div className="flex-1 flex flex-col justify-center space-y-4 overflow-y-auto">

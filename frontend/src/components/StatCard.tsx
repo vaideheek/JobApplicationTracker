@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowUpRight, ArrowDownRight, Minus, Info } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
+import InfoTooltip from './InfoTooltip';
 
 export interface StatComparison {
   diff: number;
@@ -30,18 +31,44 @@ export default function StatCard({
   tooltip,
   subtext,
 }: StatCardProps) {
-  const content = (
-    <div className={`rounded-xl border border-slate-200 bg-white p-5 transition-all ${
-      to ? 'hover:border-brand-400 hover:shadow-md cursor-pointer' : 'shadow-sm'
-    }`}>
-      <div className="flex items-start justify-between gap-2">
+  return (
+    <div
+      className={`relative rounded-xl border border-slate-200 bg-white p-5 transition-all ${
+        to
+          ? 'hover:border-brand-400 hover:shadow-md'
+          : 'shadow-sm'
+      }`}
+    >
+      {/* Real React Router Link stretched over the entire card surface */}
+      {to && (
+        <Link
+          to={to}
+          className="absolute inset-0 z-10 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+          aria-label={`View ${label}`}
+          title={label}
+        />
+      )}
+
+      <div
+        className={`relative flex items-start justify-between gap-2 ${
+          to ? 'pointer-events-none' : ''
+        }`}
+      >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 truncate">{label}</p>
+            <p
+              title={label}
+              className="text-xs font-semibold uppercase tracking-wider text-slate-500 truncate"
+            >
+              {label}
+            </p>
             {tooltip && (
-              <span title={tooltip} className="text-slate-400 hover:text-slate-600 cursor-help">
-                <Info size={13} />
-              </span>
+              <div
+                className="relative z-20 pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <InfoTooltip title={label} content={tooltip} />
+              </div>
             )}
           </div>
           <p className="mt-1.5 text-2xl font-bold text-slate-900">{value}</p>
@@ -100,14 +127,4 @@ export default function StatCard({
       </div>
     </div>
   );
-
-  if (to) {
-    return (
-      <Link to={to} className="block group text-inherit no-underline">
-        {content}
-      </Link>
-    );
-  }
-
-  return content;
 }
