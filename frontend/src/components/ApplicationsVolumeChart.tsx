@@ -46,7 +46,7 @@ export default function ApplicationsVolumeChart({
           <h2 className="text-lg font-semibold text-slate-900">Applications Over Time</h2>
           <InfoTooltip
             title="Applications Over Time"
-            content="Daily, weekly, or monthly submission volume across the selected period."
+            content="Application submission volume based on recorded application dates, grouped daily, weekly, or monthly depending on the selected range. Applications without a recorded application date cannot be plotted."
           />
         </div>
         <div className="flex items-center gap-3 text-xs">

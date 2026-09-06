@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowUpRight, ArrowDownRight, Minus } from 'lucide-react';
 import InfoTooltip from './InfoTooltip';
@@ -31,45 +31,40 @@ export default function StatCard({
   tooltip,
   subtext,
 }: StatCardProps) {
-  const navigate = useNavigate();
-
-  const handleCardClick = (e: React.MouseEvent) => {
-    // If to is defined and not middle/cmd click, navigate
-    if (to && e.button === 0 && !e.metaKey && !e.ctrlKey) {
-      navigate(to);
-    }
-  };
-
   return (
     <div
-      onClick={handleCardClick}
       className={`relative rounded-xl border border-slate-200 bg-white p-5 transition-all ${
         to
-          ? 'hover:border-brand-400 hover:shadow-md cursor-pointer'
+          ? 'hover:border-brand-400 hover:shadow-md'
           : 'shadow-sm'
       }`}
     >
-      {/* Stretched link for keyboard navigation, screen readers, and Cmd/middle-click without invalid nesting */}
+      {/* Real React Router Link stretched over the entire card surface */}
       {to && (
         <Link
           to={to}
-          className="absolute inset-0 z-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+          className="absolute inset-0 z-10 rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           aria-label={`View ${label}`}
+          title={label}
         />
       )}
 
-      <div className="relative z-10 flex items-start justify-between gap-2 pointer-events-auto">
+      <div
+        className={`relative z-0 flex items-start justify-between gap-2 ${
+          to ? 'pointer-events-none' : ''
+        }`}
+      >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <p
               title={label}
-              className="text-xs font-semibold uppercase tracking-wider text-slate-500 truncate cursor-inherit"
+              className="text-xs font-semibold uppercase tracking-wider text-slate-500 truncate"
             >
               {label}
             </p>
             {tooltip && (
               <div
-                className="relative z-20"
+                className="relative z-20 pointer-events-auto"
                 onClick={(e) => e.stopPropagation()}
               >
                 <InfoTooltip title={label} content={tooltip} />

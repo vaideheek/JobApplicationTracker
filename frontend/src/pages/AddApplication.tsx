@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -36,6 +36,11 @@ interface FailedDocumentItem extends PendingDocumentItem {
   isRetrySafe: boolean;
 }
 
+// Whitelist of existing stack's known definite pre-persistence responses.
+// For any other status (including 408 Request Timeout and all 5xx),
+// persistence cannot be safely ruled out, so it must be treated as AMBIGUOUS_TRANSPORT.
+const DEFINITE_REJECTION_STATUSES = new Set([400, 401, 403, 404, 413, 415]);
+
 /**
  * Classifies an upload error into DEFINITE_REJECTION or AMBIGUOUS_TRANSPORT
  * and extracts a clean, sanitized user-facing message with zero sensitive leakage.
@@ -48,9 +53,9 @@ export function classifyUploadError(err: any): {
   if (err && err.response) {
     const status = err.response.status;
 
-    // 4xx client errors: Validation rejected, size exceeded, demo restricted, forbidden
-    // Backend transaction semantics guarantee the file was NOT persisted.
-    if (status >= 400 && status < 500) {
+    // Specific whitelisted 4xx client errors where current backend / proxy semantics
+    // establish pre-persistence rejection.
+    if (DEFINITE_REJECTION_STATUSES.has(status)) {
       const rawMsg = err.response.data?.message || err.response.data?.error;
       let cleanMsg = '';
 
@@ -69,6 +74,12 @@ export function classifyUploadError(err: any): {
           cleanMsg = 'File size exceeds the 10 MB limit.';
         } else if (status === 403) {
           cleanMsg = 'Upload not permitted or demo restricted.';
+        } else if (status === 401) {
+          cleanMsg = 'Authentication required. Please log in again.';
+        } else if (status === 404) {
+          cleanMsg = 'Application record not found.';
+        } else if (status === 415) {
+          cleanMsg = 'Unsupported document format. Please provide a valid PDF or DOCX.';
         } else if (status === 400) {
           cleanMsg = 'Invalid file format or corrupted document.';
         } else {
@@ -82,25 +93,34 @@ export function classifyUploadError(err: any): {
       };
     }
 
-    // 5xx Server / Gateway / Proxy errors: Backend or proxy may have processed
-    // part or all of the upload before dropping connection. Per safety policy,
-    // all 5xx responses are treated as ambiguous.
+    // 408 Request Timeout: client/proxy timed out waiting for server, cannot confirm non-persistence
+    if (status === 408) {
+      return {
+        failureType: 'AMBIGUOUS_TRANSPORT',
+        message: 'Request timed out during upload. Upload status is uncertain.',
+      };
+    }
+
+    // 502 / 504 Gateway / Proxy timeouts: Request may have reached backend before proxy timed out
+    if (status === 502 || status === 504) {
+      return {
+        failureType: 'AMBIGUOUS_TRANSPORT',
+        message: 'Gateway timeout during upload. Upload status is uncertain.',
+      };
+    }
+
+    // All other 5xx errors: Backend or proxy may have processed upload before dropping connection
     if (status >= 500) {
-      if (status === 502 || status === 504) {
-        return {
-          failureType: 'AMBIGUOUS_TRANSPORT',
-          message: 'Gateway timeout during upload. Upload status is uncertain.',
-        };
-      }
       return {
         failureType: 'AMBIGUOUS_TRANSPORT',
         message: 'Server error encountered during upload. Upload status could not be confirmed.',
       };
     }
 
+    // Any other unexpected 4xx not proven to be pre-persistence
     return {
-      failureType: 'DEFINITE_REJECTION',
-      message: 'Upload request failed.',
+      failureType: 'AMBIGUOUS_TRANSPORT',
+      message: `Upload request returned unexpected status (${status}). Upload status could not be confirmed.`,
     };
   }
 
@@ -143,6 +163,10 @@ export default function AddApplication() {
   const [createdApp, setCreatedApp] = useState<JobApplication | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Synchronous mutex locks preventing double submission / retry races before async React re-renders
+  const createLockRef = useRef(false);
+  const retryLockRef = useRef(false);
+
   // Upload progress tracking
   const [uploadProgress, setUploadProgress] = useState<{
     current: number;
@@ -174,7 +198,9 @@ export default function AddApplication() {
 
   // Main submission workflow
   const handleSubmit = async (data: JobApplicationRequest) => {
-    if (submissionState !== 'IDLE') return;
+    // Synchronous mutex guard: reject immediate duplicate submissions (double clicks, repeated Enter)
+    if (createLockRef.current || submissionState !== 'IDLE') return;
+    createLockRef.current = true;
 
     setFormError(null);
     setSubmissionState('CREATING_APPLICATION');
@@ -184,7 +210,11 @@ export default function AddApplication() {
     try {
       app = await jobApplicationApi.create(data);
       setCreatedApp(app);
+      // NOTE: Once application creation succeeds, createLockRef.current remains true
+      // for the lifetime of this component instance to ensure the application is never
+      // created a second time during document uploads or partial failure recovery.
     } catch (err: any) {
+      createLockRef.current = false;
       setSubmissionState('IDLE');
       const rawMsg = err.response?.data?.message || err.message;
       const cleanMsg = typeof rawMsg === 'string' && rawMsg.trim()
@@ -252,55 +282,65 @@ export default function AddApplication() {
 
   // Retry ONLY safe failed uploads against the already created application
   const handleRetryFailedUploads = async () => {
-    if (!createdApp || isRetrying) return;
+    // Synchronous mutex guard against double activation
+    if (!createdApp || retryLockRef.current || isRetrying) return;
+    retryLockRef.current = true;
 
     // Filter only files that are guaranteed safe to retry
     const retryableItems = failedDocs.filter((d) => d.isRetrySafe);
-    if (retryableItems.length === 0) return;
-
-    setIsRetrying(true);
-    const stillFailed: FailedDocumentItem[] = [];
-    const newlySucceeded: PendingDocumentItem[] = [];
-
-    for (let i = 0; i < retryableItems.length; i++) {
-      const item = retryableItems[i];
-      setUploadProgress({
-        current: i + 1,
-        total: retryableItems.length,
-        currentFileName: item.file.name,
-      });
-
-      try {
-        await jobApplicationApi.uploadDocument(createdApp.id, item.file, item.type);
-        newlySucceeded.push({ file: item.file, type: item.type });
-      } catch (retryErr: any) {
-        const { failureType, message } = classifyUploadError(retryErr);
-        const retrySafe = isRetrySafe(item.type, failureType);
-
-        stillFailed.push({
-          file: item.file,
-          type: item.type,
-          failureType,
-          error: message,
-          isRetrySafe: retrySafe,
-        });
-      }
+    if (retryableItems.length === 0) {
+      retryLockRef.current = false;
+      return;
     }
 
-    setUploadProgress(null);
-    setIsRetrying(false);
+    setIsRetrying(true);
+    try {
+      const stillFailed: FailedDocumentItem[] = [];
+      const newlySucceeded: PendingDocumentItem[] = [];
 
-    setSuccessDocs((prev) => [...prev, ...newlySucceeded]);
+      for (let i = 0; i < retryableItems.length; i++) {
+        const item = retryableItems[i];
+        setUploadProgress({
+          current: i + 1,
+          total: retryableItems.length,
+          currentFileName: item.file.name,
+        });
 
-    // Keep items that were not retried (e.g. uncertain OTHER files) plus any that failed again
-    const unretriedItems = failedDocs.filter((d) => !d.isRetrySafe);
-    const updatedFailed = [...unretriedItems, ...stillFailed];
-    setFailedDocs(updatedFailed);
+        try {
+          await jobApplicationApi.uploadDocument(createdApp.id, item.file, item.type);
+          newlySucceeded.push({ file: item.file, type: item.type });
+        } catch (retryErr: any) {
+          const { failureType, message } = classifyUploadError(retryErr);
+          const retrySafe = isRetrySafe(item.type, failureType);
 
-    // If everything succeeded completely, navigate to application
-    if (updatedFailed.length === 0) {
-      setSubmissionState('COMPLETE');
-      navigate(`/applications/${createdApp.id}`);
+          stillFailed.push({
+            file: item.file,
+            type: item.type,
+            failureType,
+            error: message,
+            isRetrySafe: retrySafe,
+          });
+        }
+      }
+
+      setUploadProgress(null);
+
+      setSuccessDocs((prev) => [...prev, ...newlySucceeded]);
+
+      // Keep items that were not retried (e.g. uncertain files) plus any that failed again
+      const unretriedItems = failedDocs.filter((d) => !d.isRetrySafe);
+      const updatedFailed = [...unretriedItems, ...stillFailed];
+      setFailedDocs(updatedFailed);
+
+      // If everything succeeded completely, navigate to application
+      if (updatedFailed.length === 0) {
+        setSubmissionState('COMPLETE');
+        navigate(`/applications/${createdApp.id}`);
+      }
+    } finally {
+      retryLockRef.current = false;
+      setIsRetrying(false);
+      setUploadProgress(null);
     }
   };
 
