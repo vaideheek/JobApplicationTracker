@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 @Service
@@ -102,7 +103,7 @@ public class EmailImportService {
                     .jobApplication(application)
                     .fromStatus(oldStatus)
                     .toStatus(request.getStatus())
-                    .changedAt(LocalDateTime.now())
+                    .changedAt(LocalDateTime.now(ZoneOffset.UTC))
                     .note(oldStatus != request.getStatus()
                             ? "Status updated via Email Import: " + request.getStage()
                             : "Email Import processed: " + request.getStage())
@@ -137,7 +138,7 @@ public class EmailImportService {
                     .jobApplication(application)
                     .fromStatus(null)
                     .toStatus(request.getStatus())
-                    .changedAt(LocalDateTime.now())
+                    .changedAt(LocalDateTime.now(ZoneOffset.UTC))
                     .note("Application created via Email Import")
                     .build();
             statusHistoryRepository.save(history);

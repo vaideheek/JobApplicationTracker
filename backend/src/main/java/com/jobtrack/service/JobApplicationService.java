@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -44,7 +45,7 @@ public class JobApplicationService {
                 .jobApplication(application)
                 .fromStatus(null)
                 .toStatus(request.getStatus())
-                .changedAt(LocalDateTime.now())
+                .changedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .note("Application created")
                 .build();
         statusHistoryRepository.save(history);
@@ -100,7 +101,7 @@ public class JobApplicationService {
                     .jobApplication(application)
                     .fromStatus(oldStatus)
                     .toStatus(request.getStatus())
-                    .changedAt(LocalDateTime.now())
+                    .changedAt(LocalDateTime.now(ZoneOffset.UTC))
                     .note("Status changed from " + oldStatus + " to " + request.getStatus())
                     .build();
             statusHistoryRepository.save(history);

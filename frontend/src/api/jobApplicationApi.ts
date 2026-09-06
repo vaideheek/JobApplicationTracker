@@ -13,12 +13,42 @@ import type {
   BulkScanResponse,
   BulkConfirmRequest,
   BulkConfirmResponse,
+  PeriodAnalyticsResponse,
+  CurrentPipelineResponse,
 } from '../types';
 
 export const jobApplicationApi = {
   // Dashboard
   getStats: async (): Promise<DashboardStats> => {
     const { data } = await api.get('/dashboard/stats');
+    return data;
+  },
+
+  getPeriodAnalytics: async (params?: {
+    range?: string;
+    from?: string;
+    to?: string;
+    compare?: boolean;
+    timezone?: string;
+  }): Promise<PeriodAnalyticsResponse> => {
+    let timezone = params?.timezone;
+    if (!timezone && typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+      try {
+        timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      } catch {
+        // fallback to undefined/server UTC
+      }
+    }
+    const queryParams: Record<string, any> = { ...params };
+    if (timezone) {
+      queryParams.timezone = timezone;
+    }
+    const { data } = await api.get('/dashboard/period', { params: queryParams });
+    return data;
+  },
+
+  getCurrentPipeline: async (): Promise<CurrentPipelineResponse> => {
+    const { data } = await api.get('/dashboard/pipeline');
     return data;
   },
 
