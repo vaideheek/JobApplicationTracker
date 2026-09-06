@@ -8,6 +8,10 @@ interface ApplicationFormProps {
   initialData?: JobApplicationRequest;
   onSubmit: (data: JobApplicationRequest) => Promise<void>;
   submitLabel: string;
+  children?: React.ReactNode;
+  isSubmitting?: boolean;
+  submitButtonText?: string;
+  submitDisabled?: boolean;
 }
 
 const emptyForm: JobApplicationRequest = {
@@ -34,6 +38,10 @@ export default function ApplicationForm({
   initialData,
   onSubmit,
   submitLabel,
+  children,
+  isSubmitting,
+  submitButtonText,
+  submitDisabled = false,
 }: ApplicationFormProps) {
   const { user } = useAuth();
   const isDemo = user?.demoAccount || false;
@@ -355,6 +363,9 @@ export default function ApplicationForm({
         />
       </div>
 
+      {/* Optional Child Sections (e.g. ApplicationDocumentsSection) */}
+      {children}
+
       {/* Submit */}
       <div className="flex items-center justify-end gap-3 pt-2">
         {isDemo && (
@@ -365,10 +376,13 @@ export default function ApplicationForm({
         <button
           id="submit-application-btn"
           type="submit"
-          disabled={loading || isDemo}
-          className="rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+          disabled={(isSubmitting !== undefined ? isSubmitting : loading) || isDemo || submitDisabled}
+          className="rounded-lg bg-brand-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50 inline-flex items-center gap-2"
         >
-          {loading ? 'Saving...' : submitLabel}
+          {(isSubmitting !== undefined ? isSubmitting : loading) && (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          )}
+          {submitButtonText || ((isSubmitting !== undefined ? isSubmitting : loading) ? 'Saving...' : submitLabel)}
         </button>
       </div>
     </form>
