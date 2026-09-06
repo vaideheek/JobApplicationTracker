@@ -149,6 +149,7 @@ export default function Dashboard() {
         });
         setPeriodAnalytics(data);
       } catch {
+        setPeriodAnalytics(null);
         setPeriodFailed(true);
         console.error('Failed to fetch period analytics');
       } finally {
@@ -433,8 +434,7 @@ export default function Dashboard() {
             value={insightsFailed ? '—' : (insights?.missingDocumentsCount ?? 0)}
             icon={FileWarning}
             color="bg-amber-100 text-amber-600"
-            to="/applications?documentState=NO_DOCUMENTS"
-            tooltip="Click to view applications missing CVs or cover letters"
+            tooltip="Active applications missing a CV or cover letter"
           />
         </div>
       </div>
