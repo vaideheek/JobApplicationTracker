@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BarChart2, Info } from 'lucide-react';
+import InfoTooltip from './InfoTooltip';
 import type { VolumeBucket } from '../types';
 
 interface ApplicationsVolumeChartProps {
@@ -43,6 +44,10 @@ export default function ApplicationsVolumeChart({
         <div className="flex items-center gap-2">
           <BarChart2 size={20} className="text-brand-600" />
           <h2 className="text-lg font-semibold text-slate-900">Applications Over Time</h2>
+          <InfoTooltip
+            title="Applications Over Time"
+            content="Daily, weekly, or monthly submission volume across the selected period."
+          />
         </div>
         <div className="flex items-center gap-3 text-xs">
           {hoveredBucket ? (
