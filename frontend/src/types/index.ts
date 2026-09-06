@@ -184,6 +184,68 @@ export interface DashboardInsightsResponse {
   recommendedActions: RecommendedAction[];
 }
 
+export type PeriodPreset =
+  | 'THIS_WEEK'
+  | 'LAST_WEEK'
+  | 'THIS_MONTH'
+  | 'LAST_MONTH'
+  | 'LAST_30_DAYS'
+  | 'LAST_90_DAYS'
+  | 'YTD'
+  | 'ALL_TIME'
+  | 'CUSTOM';
+
+export const PERIOD_PRESET_LABELS: Record<PeriodPreset, string> = {
+  THIS_WEEK: 'This Week',
+  LAST_WEEK: 'Last Week',
+  THIS_MONTH: 'This Month',
+  LAST_MONTH: 'Last Month',
+  LAST_30_DAYS: 'Last 30 Days',
+  LAST_90_DAYS: 'Last 90 Days',
+  YTD: 'Year to Date',
+  ALL_TIME: 'All Time',
+  CUSTOM: 'Custom',
+};
+
+export interface PeriodMetrics {
+  applicationsSubmitted: number;
+  responsesRecorded: number;
+  assessmentsReached: number;
+  interviewsReached: number;
+  offersReached: number;
+  rejectionsRecorded: number;
+}
+
+export interface VolumeBucket {
+  bucketStart: string;
+  label: string;
+  applicationsSubmitted: number;
+}
+
+export interface PeriodAnalyticsResponse {
+  range: PeriodPreset;
+  from: string;
+  to: string;
+  previousFrom: string | null;
+  previousTo: string | null;
+  comparisonAvailable?: boolean;
+  unknownDateApplications: number;
+  current: PeriodMetrics;
+  previous: PeriodMetrics | null;
+  volume: VolumeBucket[];
+  historyMetricNote?: string;
+}
+
+export interface CurrentPipelineResponse {
+  applied: number;
+  inReview: number;
+  assessment: number;
+  interview: number;
+  offer: number;
+  noResponse: number;
+  totalActive: number;
+}
+
 export interface ScannedDocumentPreview {
   tempDocId: string;
   fileName: string;

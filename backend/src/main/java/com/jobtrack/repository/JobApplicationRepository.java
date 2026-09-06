@@ -34,6 +34,20 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
 
     long countByDateAppliedAfterAndUserId(LocalDate date, Long userId);
 
+    @Query("SELECT j.status, COUNT(j) FROM JobApplication j WHERE j.user.id = :userId GROUP BY j.status")
+    List<Object[]> countApplicationsByStatusGrouped(@Param("userId") Long userId);
+
+    @Query("SELECT COUNT(j) FROM JobApplication j WHERE j.user.id = :userId AND j.dateApplied IS NOT NULL AND j.dateApplied >= :from AND j.dateApplied <= :to")
+    long countApplicationsSubmittedInRange(@Param("userId") Long userId, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    long countByUserIdAndDateAppliedIsNull(Long userId);
+
+    @Query("SELECT j.dateApplied, COUNT(j) FROM JobApplication j WHERE j.user.id = :userId AND j.dateApplied IS NOT NULL AND j.dateApplied >= :from AND j.dateApplied <= :to GROUP BY j.dateApplied ORDER BY j.dateApplied ASC")
+    List<Object[]> findDailyApplicationCountsInRange(@Param("userId") Long userId, @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("SELECT j.dateApplied, COUNT(j) FROM JobApplication j WHERE j.user.id = :userId AND j.dateApplied IS NOT NULL GROUP BY j.dateApplied ORDER BY j.dateApplied ASC")
+    List<Object[]> findAllDailyApplicationCounts(@Param("userId") Long userId);
+
     @Query("SELECT COUNT(j) FROM JobApplication j WHERE " +
            "j.user.id = :userId AND " +
            "j.status NOT IN (com.jobtrack.enums.ApplicationStatus.REJECTED, com.jobtrack.enums.ApplicationStatus.WITHDRAWN, com.jobtrack.enums.ApplicationStatus.NO_RESPONSE, com.jobtrack.enums.ApplicationStatus.OFFER) " +

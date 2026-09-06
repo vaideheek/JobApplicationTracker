@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "status_history")
@@ -38,7 +39,7 @@ public class StatusHistory {
     @PrePersist
     protected void onCreate() {
         if (changedAt == null) {
-            changedAt = LocalDateTime.now();
+            changedAt = LocalDateTime.now(ZoneOffset.UTC);
         }
     }
 }
