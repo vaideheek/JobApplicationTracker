@@ -34,15 +34,18 @@ export default function InfoTooltip({
     const rect = triggerRef.current.getBoundingClientRect();
     const tooltipWidth = Math.min(280, window.innerWidth - 24);
     const estimatedHeight = 90;
+    const viewportPadding = 12;
 
     // Horizontal clamping: center on trigger, clamp between 12px and (innerWidth - width - 12px)
     let left = rect.left + rect.width / 2 - tooltipWidth / 2;
-    left = Math.max(12, Math.min(left, window.innerWidth - tooltipWidth - 12));
+    left = Math.max(viewportPadding, Math.min(left, window.innerWidth - tooltipWidth - viewportPadding));
 
     // Vertical positioning: render above if there's enough room, else below
     const spaceAbove = rect.top;
-    const placeAbove = spaceAbove >= estimatedHeight + 12;
-    const top = placeAbove ? rect.top - 8 : rect.bottom + 8;
+    const placeAbove = spaceAbove >= estimatedHeight + viewportPadding;
+    const proposedTop = placeAbove ? rect.top - estimatedHeight - 8 : rect.bottom + 8;
+    const maxTop = window.innerHeight - estimatedHeight - viewportPadding;
+    const top = Math.max(viewportPadding, Math.min(proposedTop, maxTop));
 
     setCoords({ top, left, placeAbove });
   };
@@ -62,28 +65,51 @@ export default function InfoTooltip({
     }, 120);
   };
 
-  const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (isOpen) {
-      setIsOpen(false);
-    } else {
+  const handlePointerEnter = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse') {
       handleOpen();
     }
   };
 
-  // Adjust exact position once rendered using measured height
+  const handlePointerLeave = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse') {
+      handleClose();
+    }
+  };
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    if (isOpen) {
+      setIsOpen(false);
+    } else {
+      updatePosition();
+      setIsOpen(true);
+    }
+  };
+
+  // Adjust exact position once rendered using measured height and clamp vertically
   useEffect(() => {
     if (isOpen && tooltipRef.current && triggerRef.current) {
       const triggerRect = triggerRef.current.getBoundingClientRect();
       const tooltipRect = tooltipRef.current.getBoundingClientRect();
+      const viewportPadding = 12;
 
       let left = triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2;
-      left = Math.max(12, Math.min(left, window.innerWidth - tooltipRect.width - 12));
+      left = Math.max(viewportPadding, Math.min(left, window.innerWidth - tooltipRect.width - viewportPadding));
 
       const spaceAbove = triggerRect.top;
-      const placeAbove = spaceAbove >= tooltipRect.height + 12;
-      const top = placeAbove ? triggerRect.top - tooltipRect.height - 8 : triggerRect.bottom + 8;
+      const placeAbove = spaceAbove >= tooltipRect.height + viewportPadding;
+      const proposedTop = placeAbove
+        ? triggerRect.top - tooltipRect.height - 8
+        : triggerRect.bottom + 8;
+
+      const maxTop = window.innerHeight - tooltipRect.height - viewportPadding;
+      const top = Math.max(viewportPadding, Math.min(proposedTop, maxTop));
 
       setCoords({ top, left, placeAbove });
     }
@@ -144,14 +170,16 @@ export default function InfoTooltip({
           ref={tooltipRef}
           id={tooltipId}
           role="tooltip"
-          onMouseEnter={handleOpen}
-          onMouseLeave={handleClose}
+          onPointerEnter={handlePointerEnter}
+          onPointerLeave={handlePointerLeave}
           onClick={(e) => e.stopPropagation()}
           style={{
             position: 'fixed',
             top: `${coords.top}px`,
             left: `${coords.left}px`,
             width: `min(280px, calc(100vw - 24px))`,
+            maxHeight: 'calc(100vh - 24px)',
+            overflowY: 'auto',
           }}
           className="z-[9999] rounded-lg border border-slate-700 bg-slate-900 p-3 text-xs text-slate-100 shadow-2xl transition-opacity duration-150 pointer-events-auto"
         >
@@ -177,8 +205,8 @@ export default function InfoTooltip({
         aria-label={ariaLabel || (title ? `Information about ${title}` : 'More information')}
         aria-expanded={isOpen}
         onClick={handleToggle}
-        onMouseEnter={handleOpen}
-        onMouseLeave={handleClose}
+        onPointerEnter={handlePointerEnter}
+        onPointerLeave={handlePointerLeave}
         onFocus={handleOpen}
         onBlur={handleClose}
         className={`inline-flex items-center justify-center min-w-[24px] min-h-[24px] sm:min-w-[28px] sm:min-h-[28px] p-1 rounded-md text-slate-400 hover:text-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 transition-colors cursor-help ${className}`}

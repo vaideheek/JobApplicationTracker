@@ -50,7 +50,7 @@ export default function StatCard({
       )}
 
       <div
-        className={`relative z-0 flex items-start justify-between gap-2 ${
+        className={`relative flex items-start justify-between gap-2 ${
           to ? 'pointer-events-none' : ''
         }`}
       >

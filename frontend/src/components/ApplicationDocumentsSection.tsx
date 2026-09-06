@@ -17,6 +17,9 @@ export function validateDocumentFile(file: File): string | null {
   if (!validExt) {
     return `"${file.name}" has an unsupported file format. Only PDF and DOCX files are allowed.`;
   }
+  if (file.size < 4) {
+    return `"${file.name}" is empty or too small to be a valid PDF or DOCX.`;
+  }
   if (file.size > MAX_DOCUMENT_SIZE) {
     return `"${file.name}" exceeds the maximum limit of 10 MB (${formatFileSize(file.size)}).`;
   }
@@ -202,6 +205,7 @@ export default function ApplicationDocumentsSection({
                 type="button"
                 onClick={() => cvInputRef.current?.click()}
                 disabled={isDisabled}
+                aria-label="Choose CV file"
                 className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 transition-colors"
               >
                 Choose File
@@ -213,6 +217,7 @@ export default function ApplicationDocumentsSection({
             <button
               type="button"
               onClick={() => cvInputRef.current?.click()}
+              aria-label="Replace CV file"
               className="text-[11px] text-brand-600 hover:text-brand-700 font-medium text-center self-center"
             >
               Replace with another file
@@ -268,6 +273,7 @@ export default function ApplicationDocumentsSection({
                 type="button"
                 onClick={() => coverLetterInputRef.current?.click()}
                 disabled={isDisabled}
+                aria-label="Choose cover letter file"
                 className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 transition-colors"
               >
                 Choose File
@@ -279,6 +285,7 @@ export default function ApplicationDocumentsSection({
             <button
               type="button"
               onClick={() => coverLetterInputRef.current?.click()}
+              aria-label="Replace cover letter file"
               className="text-[11px] text-purple-600 hover:text-purple-700 font-medium text-center self-center"
             >
               Replace with another file
@@ -341,6 +348,7 @@ export default function ApplicationDocumentsSection({
                 type="button"
                 onClick={() => otherInputRef.current?.click()}
                 disabled={isDisabled}
+                aria-label="Choose supporting document files"
                 className="rounded-lg bg-white border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-400 disabled:opacity-50 transition-colors"
               >
                 Choose File(s)
@@ -353,6 +361,7 @@ export default function ApplicationDocumentsSection({
               type="button"
               onClick={() => otherInputRef.current?.click()}
               disabled={isDisabled}
+              aria-label="Add more supporting document files"
               className="inline-flex items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
             >
               <Plus size={13} /> Add more files
