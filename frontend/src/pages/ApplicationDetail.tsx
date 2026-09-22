@@ -24,6 +24,7 @@ import Timeline from '../components/Timeline';
 import DeleteModal from '../components/DeleteModal';
 import { jobApplicationApi } from '../api/jobApplicationApi';
 import { format } from 'date-fns';
+import { formatDateSafe } from '../utils/dateUtils';
 import type { JobApplication, ApplicationDocument } from '../types';
 
 export default function ApplicationDetail() {
@@ -293,14 +294,14 @@ export default function ApplicationDetail() {
               <h2 className="mb-4 text-lg font-semibold text-slate-900">Details</h2>
               <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {app.location && <Detail icon={MapPin} label="Location" value={app.location} />}
-                {app.dateApplied && <Detail icon={Calendar} label="Date Applied" value={format(new Date(app.dateApplied), 'MMM d, yyyy')} />}
+                {app.dateApplied && <Detail icon={Calendar} label="Date Applied" value={formatDateSafe(app.dateApplied)} />}
                 {app.stage && <Detail icon={Flag} label="Stage" value={app.stage} />}
                 {app.source && <Detail icon={Flag} label="Source" value={app.source} />}
                 {app.salaryRange && <Detail icon={DollarSign} label="Salary Range" value={app.salaryRange} />}
                 {app.priority && <Detail icon={Flag} label="Priority" value={app.priority.charAt(0) + app.priority.slice(1).toLowerCase()} />}
                 {app.recruiterEmail && <Detail icon={Mail} label="Recruiter" value={app.recruiterEmail} />}
-                {app.followUpDate && <Detail icon={Calendar} label="Follow-up" value={format(new Date(app.followUpDate), 'MMM d, yyyy')} />}
-                {app.deadlineDate && <Detail icon={Calendar} label="Deadline" value={format(new Date(app.deadlineDate), 'MMM d, yyyy')} />}
+                {app.followUpDate && <Detail icon={Calendar} label="Follow-up" value={formatDateSafe(app.followUpDate)} />}
+                {app.deadlineDate && <Detail icon={Calendar} label="Deadline" value={formatDateSafe(app.deadlineDate)} />}
                 <Detail icon={Clock} label="Last Updated" value={format(new Date(app.lastUpdatedAt), 'MMM d, yyyy · h:mm a')} />
               </dl>
 

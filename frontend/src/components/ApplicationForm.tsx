@@ -324,7 +324,7 @@ export default function ApplicationForm({
         <h3 className="text-base font-semibold text-slate-800">Job Information</h3>
         <div className="grid grid-cols-1 gap-6">
           <div>
-            <label htmlFor="originalJobUrl" className={labelClass}>Job URL</label>
+            <label htmlFor="originalJobUrl" className={labelClass}>Original Job URL</label>
             <input
               id="originalJobUrl"
               name="originalJobUrl"

@@ -142,4 +142,136 @@ public class JobApplicationCrudTests {
 
         assertFalse(applicationRepository.existsById(saved.getId()));
     }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testCreateAndPreserveMultilineJobDescriptionAndOriginalJobUrl() throws Exception {
+        String multilineDescription = "About the Role:\n" +
+                "We are seeking a Senior Engineer & Architect.\n\n" +
+                "Requirements & Responsibilities:\n" +
+                "- 5+ years experience with Java/Spring Boot <Cloud-native>\n" +
+                "- Expertise with 'PostgreSQL' and \"REST APIs\"\n" +
+                "- Salary target: $150k - $180k © 2026 🎉\n\n" +
+                "Equal Opportunity Employer.";
+
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("TechForward Inc")
+                .jobTitle("Staff Engineer")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 8, 1))
+                .jobUrl("https://linkedin.com/jobs/view/123456")
+                .originalJobUrl("https://techforward.com/careers/staff-eng-789")
+                .jobDescription(multilineDescription)
+                .jobDescriptionSummary("Architectural leadership role in cloud systems")
+                .matchScore(92)
+                .matchedSkills("Java, Spring Boot, PostgreSQL")
+                .missingSkills("GraphQL")
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Verify loaded data has both fields
+        mockMvc.perform(get("/api/applications/" + saved.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jobDescription").value(multilineDescription))
+                .andExpect(jsonPath("$.originalJobUrl").value("https://techforward.com/careers/staff-eng-789"))
+                .andExpect(jsonPath("$.jobUrl").value("https://linkedin.com/jobs/view/123456"))
+                .andExpect(jsonPath("$.jobDescriptionSummary").value("Architectural leadership role in cloud systems"))
+                .andExpect(jsonPath("$.matchScore").value(92));
+
+        // Now simulate an edit to another field (e.g. status and stage)
+        // Ensure jobDescription, originalJobUrl, and derived fields are not erased!
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("TechForward Inc")
+                .jobTitle("Staff Engineer")
+                .status(ApplicationStatus.INTERVIEW)
+                .stage("Technical Round 1")
+                .dateApplied(LocalDate.of(2026, 8, 1))
+                .jobUrl("https://linkedin.com/jobs/view/123456")
+                .originalJobUrl("https://techforward.com/careers/staff-eng-789")
+                .jobDescription(multilineDescription)
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INTERVIEW"))
+                .andExpect(jsonPath("$.stage").value("Technical Round 1"))
+                .andExpect(jsonPath("$.jobDescription").value(multilineDescription))
+                .andExpect(jsonPath("$.originalJobUrl").value("https://techforward.com/careers/staff-eng-789"))
+                .andExpect(jsonPath("$.jobUrl").value("https://linkedin.com/jobs/view/123456"))
+                .andExpect(jsonPath("$.jobDescriptionSummary").value("Architectural leadership role in cloud systems"))
+                .andExpect(jsonPath("$.matchScore").value(92))
+                .andExpect(jsonPath("$.matchedSkills").value("Java, Spring Boot, PostgreSQL"))
+                .andExpect(jsonPath("$.missingSkills").value("GraphQL"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testEditJobDescriptionItselfPersists() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("CloudCorp")
+                .jobTitle("DevOps Specialist")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 8, 10))
+                .jobDescription("Initial description")
+                .originalJobUrl("https://cloudcorp.com/apply")
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        String newDescription = "Updated description with multiple lines:\n\nParagraph 2 with details.";
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("CloudCorp")
+                .jobTitle("DevOps Specialist")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 8, 10))
+                .jobDescription(newDescription)
+                .originalJobUrl("https://cloudcorp.com/apply-new")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jobDescription").value(newDescription))
+                .andExpect(jsonPath("$.originalJobUrl").value("https://cloudcorp.com/apply-new"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testOptionalFieldsEmptyRemainEditable() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("StartupX")
+                .jobTitle("Frontend Dev")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 8, 15))
+                .jobDescription(null)
+                .originalJobUrl(null)
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Edit application and populate previously empty fields
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("StartupX")
+                .jobTitle("Frontend Dev")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 8, 15))
+                .jobDescription("Added later")
+                .originalJobUrl("https://startupx.io/job/1")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jobDescription").value("Added later"))
+                .andExpect(jsonPath("$.originalJobUrl").value("https://startupx.io/job/1"));
+    }
 }

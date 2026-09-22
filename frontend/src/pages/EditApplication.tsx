@@ -19,7 +19,14 @@ export default function EditApplication() {
   }, [id, navigate]);
 
   const handleSubmit = async (data: JobApplicationRequest) => {
-    await jobApplicationApi.update(Number(id), data);
+    const payload: JobApplicationRequest = {
+      ...data,
+      jobDescriptionSummary: data.jobDescriptionSummary ?? app?.jobDescriptionSummary ?? undefined,
+      matchScore: data.matchScore ?? app?.matchScore ?? undefined,
+      matchedSkills: data.matchedSkills ?? app?.matchedSkills ?? undefined,
+      missingSkills: data.missingSkills ?? app?.missingSkills ?? undefined,
+    };
+    await jobApplicationApi.update(Number(id), payload);
     navigate(`/applications/${id}`);
   };
 
@@ -27,12 +34,27 @@ export default function EditApplication() {
   if (!app) return null;
 
   const initialData: JobApplicationRequest = {
-    companyName: app.companyName, jobTitle: app.jobTitle, location: app.location || '',
-    jobUrl: app.jobUrl || '', dateApplied: app.dateApplied || '', status: app.status,
-    stage: app.stage || '', recruiterEmail: app.recruiterEmail || '', notes: app.notes || '',
-    source: app.source || '', companyCareerUrl: app.companyCareerUrl || '',
-    salaryRange: app.salaryRange || '', priority: app.priority || undefined,
-    followUpDate: app.followUpDate || '', deadlineDate: app.deadlineDate || '',
+    companyName: app.companyName,
+    jobTitle: app.jobTitle,
+    location: app.location || '',
+    jobUrl: app.jobUrl || '',
+    dateApplied: app.dateApplied || '',
+    status: app.status,
+    stage: app.stage || '',
+    recruiterEmail: app.recruiterEmail || '',
+    notes: app.notes || '',
+    source: app.source || '',
+    companyCareerUrl: app.companyCareerUrl || '',
+    salaryRange: app.salaryRange || '',
+    priority: app.priority || undefined,
+    followUpDate: app.followUpDate || '',
+    deadlineDate: app.deadlineDate || '',
+    jobDescription: app.jobDescription || '',
+    originalJobUrl: app.originalJobUrl || '',
+    jobDescriptionSummary: app.jobDescriptionSummary || undefined,
+    matchScore: app.matchScore ?? undefined,
+    matchedSkills: app.matchedSkills || undefined,
+    missingSkills: app.missingSkills || undefined,
   };
 
   return (
