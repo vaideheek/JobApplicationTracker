@@ -39,6 +39,11 @@ public class JobApplicationController {
             @RequestParam(defaultValue = "lastUpdatedAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir) {
 
+        // Validate date range
+        if (dateFrom != null && dateTo != null && dateFrom.isAfter(dateTo)) {
+            throw new IllegalArgumentException("Applied From date cannot be after Applied To date");
+        }
+
         // Validate sortBy against strict allowlist
         if (!sortBy.equals("lastUpdatedAt") && !sortBy.equals("dateApplied") && !sortBy.equals("createdAt") && !sortBy.equals("companyName")) {
             throw new IllegalArgumentException("Unsupported sort field: " + sortBy);

@@ -450,4 +450,144 @@ public class JobApplicationFilteringTests {
                 .andExpect(jsonPath("$.content[0].id").value(appPopulated.getId()))
                 .andExpect(jsonPath("$.content[1].id").value(appNull.getId()));
     }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test23_DateRangeSameDate() throws Exception {
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("Day Before").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 4)).build());
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("Target Day").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 5)).build());
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("Day After").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 6)).build());
+
+        mockMvc.perform(get("/api/applications")
+                .param("dateFrom", "2026-08-05")
+                .param("dateTo", "2026-08-05"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].companyName").value("Target Day"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test24_DateRangeInclusiveStartAndEndDates() throws Exception {
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("On Start Date").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 5)).build());
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("In Between").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 6)).build());
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("On End Date").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 7)).build());
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("Out Of Range").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 8)).build());
+
+        mockMvc.perform(get("/api/applications")
+                .param("dateFrom", "2026-08-05")
+                .param("dateTo", "2026-08-07"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(3))
+                .andExpect(jsonPath("$.content[*].companyName", containsInAnyOrder("On Start Date", "In Between", "On End Date")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test25_DateRangeReturningNoApplications() throws Exception {
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("August App").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 5)).build());
+
+        mockMvc.perform(get("/api/applications")
+                .param("dateFrom", "2026-01-01")
+                .param("dateTo", "2026-01-31"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.content", hasSize(0)));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test26_MissingOrNullDateAppliedExcluded() throws Exception {
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("Null Date App").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(null).build());
+        applicationRepository.save(JobApplication.builder().user(testUser).companyName("Populated Date App").jobTitle("Dev").status(ApplicationStatus.APPLIED).dateApplied(LocalDate.of(2026, 8, 5)).build());
+
+        // With dateFrom filter active: null dateApplied must not match
+        mockMvc.perform(get("/api/applications")
+                .param("dateFrom", "2026-08-01"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].companyName").value("Populated Date App"));
+
+        // With dateTo filter active: null dateApplied must not match
+        mockMvc.perform(get("/api/applications")
+                .param("dateTo", "2026-08-10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].companyName").value("Populated Date App"));
+
+        // With both dateFrom and dateTo active: null dateApplied must not match
+        mockMvc.perform(get("/api/applications")
+                .param("dateFrom", "2026-08-01")
+                .param("dateTo", "2026-08-10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].companyName").value("Populated Date App"));
+
+        // Without date filters: both must be returned
+        mockMvc.perform(get("/api/applications"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test27_InvalidDateRangeFromAfterToReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/applications")
+                .param("dateFrom", "2026-08-10")
+                .param("dateTo", "2026-08-05"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("Applied From date cannot be after Applied To date")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test28_DateFiltersCombinedWithSearchStatusPriorityAndDocuments() throws Exception {
+        JobApplication matching = JobApplication.builder()
+                .user(testUser)
+                .companyName("TargetCorp")
+                .jobTitle("Backend Specialist")
+                .location("Remote")
+                .status(ApplicationStatus.INTERVIEW)
+                .priority(ApplicationPriority.HIGH)
+                .dateApplied(LocalDate.of(2026, 8, 5))
+                .build();
+        matching = applicationRepository.save(matching);
+
+        ApplicationDocument doc = ApplicationDocument.builder()
+                .jobApplication(matching)
+                .fileName("resume.pdf")
+                .fileType("pdf")
+                .documentType(DocumentType.CV)
+                .filePath("/docs/resume.pdf")
+                .uploadedAt(LocalDateTime.now())
+                .build();
+        documentRepository.save(doc);
+
+        // App with wrong date
+        JobApplication wrongDate = JobApplication.builder()
+                .user(testUser)
+                .companyName("TargetCorp")
+                .jobTitle("Backend Specialist")
+                .location("Remote")
+                .status(ApplicationStatus.INTERVIEW)
+                .priority(ApplicationPriority.HIGH)
+                .dateApplied(LocalDate.of(2026, 7, 20))
+                .build();
+        wrongDate = applicationRepository.save(wrongDate);
+        documentRepository.save(ApplicationDocument.builder()
+                .jobApplication(wrongDate)
+                .fileName("cv.pdf").fileType("pdf").documentType(DocumentType.CV).filePath("/docs/cv.pdf").uploadedAt(LocalDateTime.now()).build());
+
+        // Query combining search, status, priority, documentState, and date range
+        mockMvc.perform(get("/api/applications")
+                .param("search", "Target")
+                .param("status", "INTERVIEW")
+                .param("priority", "HIGH")
+                .param("documentState", "HAS_DOCUMENTS")
+                .param("dateFrom", "2026-08-01")
+                .param("dateTo", "2026-08-10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(matching.getId()));
+    }
 }

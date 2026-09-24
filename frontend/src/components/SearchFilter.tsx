@@ -47,15 +47,18 @@ export default function SearchFilter({
 }: SearchFilterProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const hasActiveFilters =
+  const isDateInvalid = Boolean(dateFrom && dateTo && dateFrom > dateTo);
+  const isDateActive = Boolean(dateFrom || dateTo);
+
+  const hasActiveFilters = Boolean(
     statusFilter ||
     priorityFilter ||
     dateFrom ||
     dateTo ||
-    documentState ||
-    sortBy !== 'lastUpdatedAt' ||
-    sortDir !== 'desc' ||
-    size !== 15;
+    documentState
+  );
+
+  const hasFilterOrSearch = Boolean(hasActiveFilters || search);
 
   return (
     <div className="flex flex-col gap-3">
@@ -87,7 +90,7 @@ export default function SearchFilter({
             Filters {hasActiveFilters && <span className="h-2 w-2 rounded-full bg-brand-600" />}
           </button>
 
-          {hasActiveFilters && (
+          {hasFilterOrSearch && (
             <button
               type="button"
               onClick={onClearFilters}
@@ -180,31 +183,74 @@ export default function SearchFilter({
 
             {/* Date From */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="filter-date-from" className="text-xs font-semibold text-slate-600">
-                Applied Date From
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="filter-date-from" className="text-xs font-semibold text-slate-600">
+                  Applied From
+                </label>
+                {dateFrom && (
+                  <button
+                    type="button"
+                    onClick={() => onDateFromChange('')}
+                    className="text-[11px] text-slate-400 hover:text-slate-600"
+                    title="Clear From date"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               <input
                 id="filter-date-from"
                 type="date"
                 value={dateFrom}
                 onChange={(e) => onDateFromChange(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className={`w-full rounded-lg border px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-1 ${
+                  isDateInvalid
+                    ? 'border-red-400 bg-red-50/10 focus:border-red-500 focus:ring-red-500'
+                    : dateFrom
+                    ? 'border-brand-400 bg-brand-50/20 focus:border-brand-500 focus:ring-brand-500'
+                    : 'border-slate-300 bg-white focus:border-brand-500 focus:ring-brand-500'
+                }`}
               />
             </div>
 
             {/* Date To */}
             <div className="flex flex-col gap-1.5">
-              <label htmlFor="filter-date-to" className="text-xs font-semibold text-slate-600">
-                Applied Date To
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="filter-date-to" className="text-xs font-semibold text-slate-600">
+                  Applied To
+                </label>
+                {dateTo && (
+                  <button
+                    type="button"
+                    onClick={() => onDateToChange('')}
+                    className="text-[11px] text-slate-400 hover:text-slate-600"
+                    title="Clear To date"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               <input
                 id="filter-date-to"
                 type="date"
                 value={dateTo}
                 onChange={(e) => onDateToChange(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                className={`w-full rounded-lg border px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-1 ${
+                  isDateInvalid
+                    ? 'border-red-400 bg-red-50/10 focus:border-red-500 focus:ring-red-500'
+                    : dateTo
+                    ? 'border-brand-400 bg-brand-50/20 focus:border-brand-500 focus:ring-brand-500'
+                    : 'border-slate-300 bg-white focus:border-brand-500 focus:ring-brand-500'
+                }`}
               />
             </div>
+
+            {/* Invalid Date Range Inline Message */}
+            {isDateInvalid && (
+              <div className="col-span-1 sm:col-span-2 lg:col-span-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 flex items-center gap-1.5">
+                <span>Applied From date cannot be later than Applied To date.</span>
+              </div>
+            )}
 
             {/* Sort By */}
             <div className="flex flex-col gap-1.5">

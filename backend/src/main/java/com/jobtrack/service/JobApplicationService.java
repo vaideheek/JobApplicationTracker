@@ -87,11 +87,19 @@ public class JobApplicationService {
             application.setDeadlineDate(request.getDeadlineDate());
         }
         application.setJobDescription(request.getJobDescription());
-        application.setJobDescriptionSummary(request.getJobDescriptionSummary());
+        if (request.getJobDescriptionSummary() != null) {
+            application.setJobDescriptionSummary(request.getJobDescriptionSummary());
+        }
         application.setOriginalJobUrl(request.getOriginalJobUrl());
-        application.setMatchScore(request.getMatchScore());
-        application.setMatchedSkills(request.getMatchedSkills());
-        application.setMissingSkills(request.getMissingSkills());
+        if (request.getMatchScore() != null) {
+            application.setMatchScore(request.getMatchScore());
+        }
+        if (request.getMatchedSkills() != null) {
+            application.setMatchedSkills(request.getMatchedSkills());
+        }
+        if (request.getMissingSkills() != null) {
+            application.setMissingSkills(request.getMissingSkills());
+        }
 
         application = jobApplicationRepository.save(application);
 

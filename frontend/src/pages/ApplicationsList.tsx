@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Plus,
@@ -10,13 +10,15 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronsUpDown,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import SearchFilter from '../components/SearchFilter';
 import StatusBadge from '../components/StatusBadge';
 import DeleteModal from '../components/DeleteModal';
 import { jobApplicationApi } from '../api/jobApplicationApi';
-import { format } from 'date-fns';
+import { formatDateSafe } from '../utils/dateUtils';
+import { STATUS_LABELS } from '../types';
 import type { JobApplication, PageResponse } from '../types';
 
 export default function ApplicationsList() {
@@ -24,6 +26,7 @@ export default function ApplicationsList() {
   const [data, setData] = useState<PageResponse<JobApplication> | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState<JobApplication | null>(null);
+  const requestIdRef = useRef(0);
   const { user } = useAuth();
   const isDemo = user?.demoAccount || false;
 
@@ -65,7 +68,17 @@ export default function ApplicationsList() {
   }, [localSearch, search, setSearchParams]);
 
   const fetchApplications = useCallback(async () => {
+    const currentRequestId = ++requestIdRef.current;
+
+    // If date range is invalid (From > To), do not execute invalid query
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setData(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
+
     try {
       const result = await jobApplicationApi.getAll({
         search: search || undefined,
@@ -80,8 +93,14 @@ export default function ApplicationsList() {
         size,
       });
 
+      // Discard stale responses if a newer request was dispatched
+      if (currentRequestId !== requestIdRef.current) {
+        return;
+      }
+
       // Handle invalid page out-of-bounds correction
       if (result.totalPages === 0 && page > 0) {
+        setData(result);
         setSearchParams((prev) => {
           const next = new URLSearchParams(prev);
           next.set('page', '0');
@@ -91,6 +110,7 @@ export default function ApplicationsList() {
       }
 
       if (result.totalPages > 0 && page >= result.totalPages) {
+        setData(result);
         setSearchParams((prev) => {
           const next = new URLSearchParams(prev);
           next.set('page', String(result.totalPages - 1));
@@ -101,15 +121,26 @@ export default function ApplicationsList() {
 
       setData(result);
     } catch (err) {
-      console.error('Failed to fetch applications:', err);
+      if (currentRequestId === requestIdRef.current) {
+        console.error('Failed to fetch applications:', err);
+      }
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [search, statusFilter, priorityFilter, dateFrom, dateTo, documentState, sortBy, sortDir, page, size, setSearchParams]);
 
   useEffect(() => {
     fetchApplications();
   }, [fetchApplications]);
+
+  // Invalidate any in-flight requests when component unmounts
+  useEffect(() => {
+    return () => {
+      requestIdRef.current++;
+    };
+  }, []);
 
   // Helper to set individual query parameters
   const updateQueryParam = (key: string, value: string | null, resetPage = true) => {
@@ -124,7 +155,17 @@ export default function ApplicationsList() {
 
   const handleClearFilters = () => {
     setLocalSearch('');
-    setSearchParams(new URLSearchParams());
+    setSearchParams((prev) => {
+      const next = new URLSearchParams();
+      const currentSortBy = prev.get('sortBy');
+      const currentSortDir = prev.get('sortDir');
+      const currentSize = prev.get('size');
+      if (currentSortBy) next.set('sortBy', currentSortBy);
+      if (currentSortDir) next.set('sortDir', currentSortDir);
+      if (currentSize) next.set('size', currentSize);
+      next.set('page', '0');
+      return next;
+    });
   };
 
   const handleHeaderSort = (field: string) => {
@@ -245,6 +286,96 @@ export default function ApplicationsList() {
         />
       </div>
 
+      {/* Active Filter Chips */}
+      {Boolean(search || statusFilter || priorityFilter || dateFrom || dateTo || documentState) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500">Active filters:</span>
+          {search && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+              Search: "{search}"
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalSearch('');
+                  updateQueryParam('search', null);
+                }}
+                className="ml-0.5 text-slate-400 hover:text-slate-600"
+                title="Remove search filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {statusFilter && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 border border-blue-100">
+              Status: {STATUS_LABELS[statusFilter as keyof typeof STATUS_LABELS] || statusFilter}
+              <button
+                type="button"
+                onClick={() => updateQueryParam('status', null)}
+                className="ml-0.5 text-blue-400 hover:text-blue-600"
+                title="Remove status filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {priorityFilter && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 border border-amber-100">
+              Priority: {priorityFilter.charAt(0) + priorityFilter.slice(1).toLowerCase()}
+              <button
+                type="button"
+                onClick={() => updateQueryParam('priority', null)}
+                className="ml-0.5 text-amber-400 hover:text-amber-600"
+                title="Remove priority filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {(dateFrom || dateTo) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 border border-brand-200">
+              Applied: {dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : dateFrom ? `From ${dateFrom}` : `To ${dateTo}`}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    next.delete('dateFrom');
+                    next.delete('dateTo');
+                    next.set('page', '0');
+                    return next;
+                  });
+                }}
+                className="ml-0.5 text-brand-400 hover:text-brand-600"
+                title="Remove date filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          {documentState && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 border border-purple-100">
+              Docs: {documentState === 'HAS_DOCUMENTS' ? 'Has Documents' : 'No Documents'}
+              <button
+                type="button"
+                onClick={() => updateQueryParam('documentState', null)}
+                className="ml-0.5 text-purple-400 hover:text-purple-600"
+                title="Remove document filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleClearFilters}
+            className="text-xs font-medium text-slate-500 hover:text-brand-600 underline ml-1"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
+
       {/* Applications Table */}
       <div className="rounded-xl border border-slate-200 bg-white">
         {loading ? (
@@ -253,7 +384,29 @@ export default function ApplicationsList() {
           </div>
         ) : !data || data.content.length === 0 ? (
           <div className="px-6 py-16 text-center">
-            <p className="text-slate-500">No applications found.</p>
+            {dateFrom && dateTo && dateFrom > dateTo ? (
+              <div className="space-y-2">
+                <p className="text-base font-semibold text-slate-800">Invalid Date Range</p>
+                <p className="text-sm text-slate-500">"Applied From" cannot be later than "Applied To". Please adjust your dates.</p>
+              </div>
+            ) : (search || statusFilter || priorityFilter || dateFrom || dateTo || documentState) ? (
+              <div className="space-y-3">
+                <p className="text-base font-semibold text-slate-800">No matching applications</p>
+                <p className="text-sm text-slate-500">No applications matched your active filters. Try adjusting or clearing them.</p>
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-base font-semibold text-slate-800">No applications found</p>
+                <p className="text-sm text-slate-500">Get started by creating your first application.</p>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -294,9 +447,7 @@ export default function ApplicationsList() {
                         <StatusBadge status={app.status} />
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-500">
-                        {app.dateApplied
-                          ? format(new Date(app.dateApplied), 'MMM d, yyyy')
-                          : '—'}
+                        {formatDateSafe(app.dateApplied)}
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-500">
                         {app.priority ? (
