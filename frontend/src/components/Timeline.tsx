@@ -1,6 +1,7 @@
 import { format } from 'date-fns';
 import { STATUS_LABELS } from '../types';
 import type { StatusHistoryEntry } from '../types';
+import { formatDateSafe } from '../utils/dateUtils';
 
 interface TimelineProps {
   entries: StatusHistoryEntry[];
@@ -45,9 +46,21 @@ export default function Timeline({ entries }: TimelineProps) {
             {entry.note && (
               <p className="mt-0.5 text-sm text-slate-500">{entry.note}</p>
             )}
-            <p className="mt-1 text-xs text-slate-400">
-              {format(new Date(entry.changedAt), 'MMM d, yyyy · h:mm a')}
-            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+              {entry.occurredOn && (
+                <>
+                  <span>
+                    <span className="font-medium text-slate-600">Status changed on:</span>{' '}
+                    {formatDateSafe(entry.occurredOn)}
+                  </span>
+                  <span className="text-slate-300">·</span>
+                </>
+              )}
+              <span className="text-slate-400">
+                <span className="font-medium text-slate-500">Recorded in JobTrack on:</span>{' '}
+                {format(new Date(entry.changedAt), 'MMM d, yyyy · h:mm a')}
+              </span>
+            </div>
           </div>
         </div>
       ))}

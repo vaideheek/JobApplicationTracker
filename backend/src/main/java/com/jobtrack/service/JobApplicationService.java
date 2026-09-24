@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -41,10 +42,19 @@ public class JobApplicationService {
         application = jobApplicationRepository.save(application);
 
         // Create initial status history entry
+        LocalDate initialOccurredOn = null;
+        if (request.getStatusChangeDate() != null) {
+            validateStatusChangeDate(request.getStatusChangeDate());
+            initialOccurredOn = request.getStatusChangeDate();
+        } else if (request.getStatus() == ApplicationStatus.APPLIED && request.getDateApplied() != null) {
+            initialOccurredOn = request.getDateApplied();
+        }
+
         StatusHistory history = StatusHistory.builder()
                 .jobApplication(application)
                 .fromStatus(null)
                 .toStatus(request.getStatus())
+                .occurredOn(initialOccurredOn)
                 .changedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .note("Application created")
                 .build();
@@ -105,10 +115,19 @@ public class JobApplicationService {
 
         // Track status change if status changed
         if (oldStatus != request.getStatus()) {
+            LocalDate occurredDate;
+            if (request.getStatusChangeDate() != null) {
+                validateStatusChangeDate(request.getStatusChangeDate());
+                occurredDate = request.getStatusChangeDate();
+            } else {
+                occurredDate = LocalDate.now(ZoneOffset.UTC);
+            }
+
             StatusHistory history = StatusHistory.builder()
                     .jobApplication(application)
                     .fromStatus(oldStatus)
                     .toStatus(request.getStatus())
+                    .occurredOn(occurredDate)
                     .changedAt(LocalDateTime.now(ZoneOffset.UTC))
                     .note("Status changed from " + oldStatus + " to " + request.getStatus())
                     .build();
@@ -238,11 +257,19 @@ public class JobApplicationService {
                         .id(h.getId())
                         .fromStatus(h.getFromStatus())
                         .toStatus(h.getToStatus())
+                        .occurredOn(h.getOccurredOn())
                         .changedAt(h.getChangedAt())
                         .note(h.getNote())
                         .build())
                 .collect(Collectors.toList());
         response.setStatusHistory(history);
         return response;
+    }
+
+    private void validateStatusChangeDate(LocalDate date) {
+        LocalDate maxGlobalToday = LocalDate.now(ZoneId.of("Pacific/Kiritimati"));
+        if (date.isAfter(maxGlobalToday)) {
+            throw new IllegalArgumentException("Status change date cannot be in the future");
+        }
     }
 }

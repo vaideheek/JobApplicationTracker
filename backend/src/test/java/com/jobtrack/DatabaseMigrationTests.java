@@ -254,4 +254,54 @@ public class DatabaseMigrationTests {
             }
         }
     }
+
+    @Test
+    public void testMigrationV5_AddOccurredOnToStatusHistory() throws Exception {
+        DataSource ds = createTestDataSource("migration_scenario_v5");
+
+        // 1. Run migrations up to V4
+        Flyway flywayV4 = Flyway.configure()
+                .dataSource(ds)
+                .locations("classpath:db/migration")
+                .target("4")
+                .load();
+        flywayV4.migrate();
+
+        // 2. Insert test user, application, and legacy status history record (before occurred_on exists)
+        try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO users (id, username, password_hash, role, enabled, demo_account, created_at) " +
+                    "VALUES (1, 'legacy_owner@test.com', 'hash', 'ROLE_USER', true, false, NOW())");
+            stmt.execute("INSERT INTO job_applications (id, user_id, company_name, job_title, status, created_at, last_updated_at) " +
+                    "VALUES (100, 1, 'LegacyCo', 'Engineer', 'APPLIED', NOW(), NOW())");
+            stmt.execute("INSERT INTO status_history (id, job_application_id, from_status, to_status, changed_at, note) " +
+                    "VALUES (500, 100, null, 'APPLIED', NOW(), 'Initial legacy status')");
+        }
+
+        // 3. Migrate to V5
+        Flyway flywayV5 = Flyway.configure()
+                .dataSource(ds)
+                .locations("classpath:db/migration")
+                .target("5")
+                .load();
+        flywayV5.migrate();
+
+        // 4. Verify existing record has occurred_on = NULL and new record with occurred_on succeeds
+        try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+            // Check legacy record
+            try (ResultSet rs = stmt.executeQuery("SELECT id, occurred_on, changed_at FROM status_history WHERE id = 500")) {
+                assertTrue(rs.next());
+                assertNull(rs.getDate("occurred_on"), "Legacy history record must have NULL occurred_on");
+                assertNotNull(rs.getTimestamp("changed_at"), "changed_at must remain populated");
+            }
+
+            // Insert new record with occurred_on
+            stmt.execute("INSERT INTO status_history (id, job_application_id, from_status, to_status, occurred_on, changed_at, note) " +
+                    "VALUES (501, 100, 'APPLIED', 'INTERVIEW', '2026-09-10', NOW(), 'Interview scheduled')");
+
+            try (ResultSet rs = stmt.executeQuery("SELECT id, occurred_on FROM status_history WHERE id = 501")) {
+                assertTrue(rs.next());
+                assertEquals("2026-09-10", rs.getDate("occurred_on").toString());
+            }
+        }
+    }
 }
