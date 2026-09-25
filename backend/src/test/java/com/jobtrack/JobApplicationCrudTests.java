@@ -2,9 +2,11 @@ package com.jobtrack;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jobtrack.entity.JobApplication;
+import com.jobtrack.entity.StatusHistory;
 import com.jobtrack.entity.User;
 import com.jobtrack.enums.ApplicationStatus;
 import com.jobtrack.repository.JobApplicationRepository;
+import com.jobtrack.repository.StatusHistoryRepository;
 import com.jobtrack.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,7 +22,9 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
+import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -35,6 +39,9 @@ public class JobApplicationCrudTests {
 
     @Autowired
     private JobApplicationRepository applicationRepository;
+
+    @Autowired
+    private StatusHistoryRepository statusHistoryRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -273,5 +280,326 @@ public class JobApplicationCrudTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobDescription").value("Added later"))
                 .andExpect(jsonPath("$.originalJobUrl").value("https://startupx.io/job/1"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateApplication_StatusChangeWithEarlierOccurredOnDate() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("AcmeCorp")
+                .jobTitle("Backend Engineer")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Record a rejection that occurred on Sep 10, updated in JobTrack today
+        LocalDate occurredDate = LocalDate.of(2026, 9, 10);
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("AcmeCorp")
+                .jobTitle("Backend Engineer")
+                .status(ApplicationStatus.REJECTED)
+                .statusChangeDate(occurredDate)
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REJECTED"));
+
+        // Verify status history
+        mockMvc.perform(get("/api/applications/" + saved.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusHistory", hasSize(1)))
+                .andExpect(jsonPath("$.statusHistory[0].fromStatus").value("APPLIED"))
+                .andExpect(jsonPath("$.statusHistory[0].toStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.statusHistory[0].occurredOn").value("2026-09-10"))
+                .andExpect(jsonPath("$.statusHistory[0].changedAt").exists());
+
+        // Verify database entity directly
+        var historyEntries = statusHistoryRepository.findByJobApplicationIdOrderByChangedAtDesc(saved.getId());
+        assertEquals(1, historyEntries.size());
+        assertEquals(occurredDate, historyEntries.get(0).getOccurredOn());
+        assertNotNull(historyEntries.get(0).getChangedAt());
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateApplication_UnchangedStatusDoesNotCreateStatusHistory() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("BetaTech")
+                .jobTitle("Platform Engineer")
+                .status(ApplicationStatus.INTERVIEW)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Pre-existing initial history entry
+        StatusHistory initial = StatusHistory.builder()
+                .jobApplication(saved)
+                .fromStatus(null)
+                .toStatus(ApplicationStatus.INTERVIEW)
+                .occurredOn(LocalDate.of(2026, 9, 5))
+                .changedAt(LocalDateTime.now())
+                .note("Application created")
+                .build();
+        statusHistoryRepository.save(initial);
+
+        // Edit other application details without changing status
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("BetaTech Inc.")
+                .jobTitle("Lead Platform Engineer")
+                .notes("Added new notes during edit")
+                .status(ApplicationStatus.INTERVIEW)
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companyName").value("BetaTech Inc."))
+                .andExpect(jsonPath("$.jobTitle").value("Lead Platform Engineer"));
+
+        // Verify NO new status history entry was created
+        var historyEntries = statusHistoryRepository.findByJobApplicationIdOrderByChangedAtDesc(saved.getId());
+        assertEquals(1, historyEntries.size(), "Unchanged status edit must not create a new status history entry");
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateApplication_FutureStatusChangeDateRejected() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Date strictly in the future for any timezone on Earth (e.g. 5 days from max global today)
+        LocalDate futureDate = LocalDate.now(ZoneId.of("Pacific/Kiritimati")).plusDays(5);
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.REJECTED)
+                .statusChangeDate(futureDate)
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("Status change date cannot be in the future")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateStatus_WithUserTimezone_FutureDateRejected() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .user(testUser)
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Tomorrow in America/New_York
+        LocalDate tomorrowInNewYork = LocalDate.now(ZoneId.of("America/New_York")).plusDays(1);
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.REJECTED)
+                .statusChangeDate(tomorrowInNewYork)
+                .timezone("America/New_York")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("Status change date cannot be in the future")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateStatus_WithUserTimezone_TodayAccepted() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .user(testUser)
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Today in America/New_York
+        LocalDate todayInNewYork = LocalDate.now(ZoneId.of("America/New_York"));
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.INTERVIEW)
+                .statusChangeDate(todayInNewYork)
+                .timezone("America/New_York")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INTERVIEW"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateStatus_WithInvalidTimezone_ReturnsBadRequest() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .user(testUser)
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.INTERVIEW)
+                .statusChangeDate(LocalDate.now())
+                .timezone("Invalid/Unknown_Zone")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("Invalid timezone")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testCreateApplication_DirectlyInLaterStatus_WithoutStatusDate_OccurredOnIsNull() throws Exception {
+        com.jobtrack.dto.JobApplicationRequest request = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("DeltaSystems")
+                .jobTitle("Systems Architect")
+                .status(ApplicationStatus.REJECTED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+
+        String responseJson = mockMvc.perform(post("/api/applications")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        Long appId = objectMapper.readTree(responseJson).get("id").asLong();
+
+        // Check history
+        mockMvc.perform(get("/api/applications/" + appId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusHistory", hasSize(1)))
+                .andExpect(jsonPath("$.statusHistory[0].toStatus").value("REJECTED"))
+                .andExpect(jsonPath("$.statusHistory[0].occurredOn").doesNotExist());
+
+        var history = statusHistoryRepository.findByJobApplicationIdOrderByChangedAtDesc(appId);
+        assertEquals(1, history.size());
+        assertNull(history.get(0).getOccurredOn(), "Initial status history for later stage without explicit date must have null occurredOn");
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testCreateApplication_DirectlyInLaterStatus_WithStatusDate() throws Exception {
+        LocalDate explicitDate = LocalDate.of(2026, 9, 8);
+        com.jobtrack.dto.JobApplicationRequest request = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("EpsilonLLC")
+                .jobTitle("Security Analyst")
+                .status(ApplicationStatus.OFFER)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .statusChangeDate(explicitDate)
+                .build();
+
+        String responseJson = mockMvc.perform(post("/api/applications")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        Long appId = objectMapper.readTree(responseJson).get("id").asLong();
+
+        mockMvc.perform(get("/api/applications/" + appId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusHistory[0].toStatus").value("OFFER"))
+                .andExpect(jsonPath("$.statusHistory[0].occurredOn").value("2026-09-08"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testCreateApplication_InitialAppliedStatus_UsesDateApplied() throws Exception {
+        LocalDate applyDate = LocalDate.of(2026, 8, 25);
+        com.jobtrack.dto.JobApplicationRequest request = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("ZetaLabs")
+                .jobTitle("ML Engineer")
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(applyDate)
+                .build();
+
+        String responseJson = mockMvc.perform(post("/api/applications")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        Long appId = objectMapper.readTree(responseJson).get("id").asLong();
+
+        mockMvc.perform(get("/api/applications/" + appId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusHistory[0].toStatus").value("APPLIED"))
+                .andExpect(jsonPath("$.statusHistory[0].occurredOn").value("2026-08-25"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testGetApplication_LegacyHistoryRecordWithNullOccurredOn() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .user(testUser)
+                .companyName("LegacyCo")
+                .jobTitle("QA Specialist")
+                .status(ApplicationStatus.INTERVIEW)
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Seed legacy record with null occurredOn
+        StatusHistory legacyHistory = StatusHistory.builder()
+                .jobApplication(saved)
+                .fromStatus(ApplicationStatus.APPLIED)
+                .toStatus(ApplicationStatus.INTERVIEW)
+                .occurredOn(null)
+                .changedAt(LocalDateTime.of(2026, 8, 15, 14, 30))
+                .note("Legacy transition")
+                .build();
+        statusHistoryRepository.save(legacyHistory);
+
+        mockMvc.perform(get("/api/applications/" + saved.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.statusHistory", hasSize(1)))
+                .andExpect(jsonPath("$.statusHistory[0].occurredOn").doesNotExist())
+                .andExpect(jsonPath("$.statusHistory[0].changedAt").value("2026-08-15T14:30:00"));
     }
 }

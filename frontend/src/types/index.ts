@@ -60,12 +60,15 @@ export interface JobApplicationRequest {
   matchScore?: number;
   matchedSkills?: string;
   missingSkills?: string;
+  statusChangeDate?: string;
+  timezone?: string;
 }
 
 export interface StatusHistoryEntry {
   id: number;
   fromStatus: ApplicationStatus | null;
   toStatus: ApplicationStatus;
+  occurredOn?: string | null;
   changedAt: string;
   note: string | null;
 }

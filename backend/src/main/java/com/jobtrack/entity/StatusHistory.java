@@ -4,6 +4,7 @@ import com.jobtrack.enums.ApplicationStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
@@ -30,6 +31,9 @@ public class StatusHistory {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ApplicationStatus toStatus;
+
+    @Column(name = "occurred_on")
+    private LocalDate occurredOn;
 
     @Column(nullable = false)
     private LocalDateTime changedAt;

@@ -395,11 +395,11 @@ public class DashboardService {
                 .withZoneSameInstant(ZoneOffset.UTC)
                 .toLocalDateTime();
 
-        long responses = statusHistoryRepository.countDistinctResponsesInRange(userId, RESPONSE_STATUSES, startUtc, endExclusiveUtc);
-        long assessments = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.ASSESSMENT, startUtc, endExclusiveUtc);
-        long interviews = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.INTERVIEW, startUtc, endExclusiveUtc);
-        long offers = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.OFFER, startUtc, endExclusiveUtc);
-        long rejections = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.REJECTED, startUtc, endExclusiveUtc);
+        long responses = statusHistoryRepository.countDistinctResponsesInRange(userId, RESPONSE_STATUSES, from, to, startUtc, endExclusiveUtc);
+        long assessments = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.ASSESSMENT, from, to, startUtc, endExclusiveUtc);
+        long interviews = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.INTERVIEW, from, to, startUtc, endExclusiveUtc);
+        long offers = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.OFFER, from, to, startUtc, endExclusiveUtc);
+        long rejections = statusHistoryRepository.countDistinctStatusInRange(userId, ApplicationStatus.REJECTED, from, to, startUtc, endExclusiveUtc);
 
         return PeriodMetrics.builder()
                 .applicationsSubmitted(appsSubmitted)

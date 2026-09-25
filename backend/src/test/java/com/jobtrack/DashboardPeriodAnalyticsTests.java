@@ -1274,4 +1274,89 @@ public class DashboardPeriodAnalyticsTests {
         assertNull(allTime.previousFrom());
         assertNull(allTime.previousTo());
     }
+
+    // =========================================================================
+    // Tests: Status Event OccurredOn Date Attribution & Legacy Fallback
+    // =========================================================================
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testStatusEventWithEarlierOccurredOnDate_AttributedToOccurredDate() throws Exception {
+        JobApplication app = applicationRepository.save(JobApplication.builder()
+                .user(testUser)
+                .companyName("AttributionCorp")
+                .jobTitle("Backend Engineer")
+                .status(ApplicationStatus.REJECTED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build());
+
+        // Rejection actually occurred on 2026-09-10, but recorded in JobTrack on 2026-09-24
+        statusHistoryRepository.save(StatusHistory.builder()
+                .jobApplication(app)
+                .fromStatus(ApplicationStatus.APPLIED)
+                .toStatus(ApplicationStatus.REJECTED)
+                .occurredOn(LocalDate.of(2026, 9, 10))
+                .changedAt(LocalDateTime.of(2026, 9, 24, 18, 0, 0))
+                .note("Status changed from APPLIED to REJECTED")
+                .build());
+
+        // Range 1: 2026-09-01 to 2026-09-15 includes 2026-09-10 -> must count the rejection
+        mockMvc.perform(get("/api/dashboard/period")
+                        .param("range", "CUSTOM")
+                        .param("from", "2026-09-01")
+                        .param("to", "2026-09-15"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.rejectionsRecorded").value(1))
+                .andExpect(jsonPath("$.current.responsesRecorded").value(1));
+
+        // Range 2: 2026-09-20 to 2026-09-25 includes the recording timestamp (Sep 24) but NOT the occurrence date (Sep 10)
+        // -> must NOT attribute the rejection to this range
+        mockMvc.perform(get("/api/dashboard/period")
+                        .param("range", "CUSTOM")
+                        .param("from", "2026-09-20")
+                        .param("to", "2026-09-25"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.rejectionsRecorded").value(0))
+                .andExpect(jsonPath("$.current.responsesRecorded").value(0));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testLegacyStatusEventWithNullOccurredOn_FallsBackToChangedAt() throws Exception {
+        JobApplication app = applicationRepository.save(JobApplication.builder()
+                .user(testUser)
+                .companyName("LegacyFallbackCorp")
+                .jobTitle("Fullstack Dev")
+                .status(ApplicationStatus.INTERVIEW)
+                .dateApplied(LocalDate.of(2026, 8, 25))
+                .build());
+
+        // Legacy record: occurredOn is NULL, changedAt is 2026-09-05T12:00:00
+        statusHistoryRepository.save(StatusHistory.builder()
+                .jobApplication(app)
+                .fromStatus(ApplicationStatus.APPLIED)
+                .toStatus(ApplicationStatus.INTERVIEW)
+                .occurredOn(null)
+                .changedAt(LocalDateTime.of(2026, 9, 5, 12, 0, 0))
+                .note("Legacy interview event")
+                .build());
+
+        // Range containing changedAt: 2026-09-01 to 2026-09-10 -> should count via fallback
+        mockMvc.perform(get("/api/dashboard/period")
+                        .param("range", "CUSTOM")
+                        .param("from", "2026-09-01")
+                        .param("to", "2026-09-10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.interviewsReached").value(1))
+                .andExpect(jsonPath("$.current.responsesRecorded").value(1));
+
+        // Range not containing changedAt: 2026-09-11 to 2026-09-20 -> should NOT count
+        mockMvc.perform(get("/api/dashboard/period")
+                        .param("range", "CUSTOM")
+                        .param("from", "2026-09-11")
+                        .param("to", "2026-09-20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current.interviewsReached").value(0))
+                .andExpect(jsonPath("$.current.responsesRecorded").value(0));
+    }
 }

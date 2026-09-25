@@ -34,6 +34,14 @@ const emptyForm: JobApplicationRequest = {
   jobDescription: '',
 };
 
+const getTodayLocalDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function ApplicationForm({
   initialData,
   onSubmit,
@@ -45,10 +53,15 @@ export default function ApplicationForm({
 }: ApplicationFormProps) {
   const { user } = useAuth();
   const isDemo = user?.demoAccount || false;
+  const isEditing = Boolean(initialData && initialData.status);
   const [form, setForm] = useState<JobApplicationRequest>(initialData || emptyForm);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [suggestion, setSuggestion] = useState<{ priority: ApplicationPriority; explanation: string } | null>(null);
+
+  const isStatusChanging = isEditing
+    ? form.status !== initialData?.status
+    : form.status !== 'APPLIED';
 
   useEffect(() => {
     const delayDebounce = setTimeout(async () => {
@@ -67,7 +80,17 @@ export default function ApplicationForm({
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value || undefined }));
+    if (name === 'status') {
+      const newStatus = value as ApplicationStatus;
+      const willBeChanging = isEditing ? newStatus !== initialData?.status : newStatus !== 'APPLIED';
+      setForm((prev) => ({
+        ...prev,
+        status: newStatus,
+        statusChangeDate: willBeChanging ? (prev.statusChangeDate || getTodayLocalDate()) : undefined,
+      }));
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value || undefined }));
+    }
     if (errors[name]) {
       setErrors((prev) => {
         const next = { ...prev };
@@ -81,6 +104,14 @@ export default function ApplicationForm({
     const newErrors: Record<string, string> = {};
     if (!form.companyName.trim()) newErrors.companyName = 'Company name is required';
     if (!form.jobTitle.trim()) newErrors.jobTitle = 'Job title is required';
+    if (isStatusChanging) {
+      const today = getTodayLocalDate();
+      if (!form.statusChangeDate) {
+        newErrors.statusChangeDate = 'Status change date is required';
+      } else if (form.statusChangeDate > today) {
+        newErrors.statusChangeDate = 'Status change date cannot be in the future';
+      }
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -90,7 +121,13 @@ export default function ApplicationForm({
     if (!validate()) return;
     setLoading(true);
     try {
-      await onSubmit(form);
+      const clientTimezone = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
+      const submitPayload: JobApplicationRequest = {
+        ...form,
+        statusChangeDate: isStatusChanging ? (form.statusChangeDate || getTodayLocalDate()) : undefined,
+        timezone: clientTimezone,
+      };
+      await onSubmit(submitPayload);
     } catch {
       // Error handled by caller
     } finally {
@@ -189,8 +226,8 @@ export default function ApplicationForm({
         </div>
       </div>
 
-      {/* Row 4: Status, Stage, Priority */}
-      <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+      {/* Row 4: Status, (Status changed on), Stage, Priority */}
+      <div className={`grid grid-cols-1 gap-6 ${isStatusChanging ? 'sm:grid-cols-2 lg:grid-cols-4' : 'sm:grid-cols-3'}`}>
         <div>
           <label htmlFor="status" className={labelClass}>
             Status <span className="text-red-500">*</span>
@@ -207,6 +244,23 @@ export default function ApplicationForm({
             ))}
           </select>
         </div>
+        {isStatusChanging && (
+          <div>
+            <label htmlFor="statusChangeDate" className={labelClass}>
+              Status changed on <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="date"
+              id="statusChangeDate"
+              name="statusChangeDate"
+              value={form.statusChangeDate || getTodayLocalDate()}
+              max={getTodayLocalDate()}
+              onChange={handleChange}
+              className={`${inputClass} ${errors.statusChangeDate ? 'border-red-400' : ''}`}
+            />
+            {errors.statusChangeDate && <p className={errorClass}>{errors.statusChangeDate}</p>}
+          </div>
+        )}
         <div>
           <label htmlFor="stage" className={labelClass}>Stage</label>
           <input
