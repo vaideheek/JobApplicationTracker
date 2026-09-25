@@ -44,7 +44,7 @@ public class JobApplicationService {
         // Create initial status history entry
         LocalDate initialOccurredOn = null;
         if (request.getStatusChangeDate() != null) {
-            validateStatusChangeDate(request.getStatusChangeDate());
+            validateStatusChangeDate(request.getStatusChangeDate(), request.getTimezone());
             initialOccurredOn = request.getStatusChangeDate();
         } else if (request.getStatus() == ApplicationStatus.APPLIED && request.getDateApplied() != null) {
             initialOccurredOn = request.getDateApplied();
@@ -117,7 +117,7 @@ public class JobApplicationService {
         if (oldStatus != request.getStatus()) {
             LocalDate occurredDate;
             if (request.getStatusChangeDate() != null) {
-                validateStatusChangeDate(request.getStatusChangeDate());
+                validateStatusChangeDate(request.getStatusChangeDate(), request.getTimezone());
                 occurredDate = request.getStatusChangeDate();
             } else {
                 occurredDate = LocalDate.now(ZoneOffset.UTC);
@@ -266,9 +266,29 @@ public class JobApplicationService {
         return response;
     }
 
-    private void validateStatusChangeDate(LocalDate date) {
-        LocalDate maxGlobalToday = LocalDate.now(ZoneId.of("Pacific/Kiritimati"));
-        if (date.isAfter(maxGlobalToday)) {
+    /**
+     * Validates that the status change date is not in the future.
+     * If a valid IANA user timezone (e.g., "America/New_York", "Europe/London") is provided,
+     * the date is validated against the current date in that timezone.
+     * If no timezone is supplied, a global boundary of Pacific/Kiritimati (UTC+14, the earliest
+     * timezone to experience a new calendar day) is used as a fallback.
+     * Note: While Pacific/Kiritimati ensures dates impossible anywhere on Earth are rejected,
+     * it permits dates that are still tomorrow in the user's specific local timezone if timezone is omitted.
+     */
+    private void validateStatusChangeDate(LocalDate date, String userTimezone) {
+        ZoneId zone = null;
+        if (userTimezone != null && !userTimezone.isBlank()) {
+            try {
+                zone = ZoneId.of(userTimezone.trim());
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid timezone: " + userTimezone);
+            }
+        }
+        if (zone == null) {
+            zone = ZoneId.of("Pacific/Kiritimati");
+        }
+        LocalDate maxToday = LocalDate.now(zone);
+        if (date.isAfter(maxToday)) {
             throw new IllegalArgumentException("Status change date cannot be in the future");
         }
     }

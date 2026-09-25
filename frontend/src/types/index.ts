@@ -61,6 +61,7 @@ export interface JobApplicationRequest {
   matchedSkills?: string;
   missingSkills?: string;
   statusChangeDate?: string;
+  timezone?: string;
 }
 
 export interface StatusHistoryEntry {

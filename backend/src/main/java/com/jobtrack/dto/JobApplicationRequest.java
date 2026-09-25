@@ -61,4 +61,6 @@ public class JobApplicationRequest {
     private String missingSkills;
 
     private LocalDate statusChangeDate;
+
+    private String timezone;
 }

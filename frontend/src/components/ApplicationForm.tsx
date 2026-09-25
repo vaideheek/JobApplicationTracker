@@ -121,9 +121,11 @@ export default function ApplicationForm({
     if (!validate()) return;
     setLoading(true);
     try {
+      const clientTimezone = Intl?.DateTimeFormat?.().resolvedOptions?.().timeZone;
       const submitPayload: JobApplicationRequest = {
         ...form,
         statusChangeDate: isStatusChanging ? (form.statusChangeDate || getTodayLocalDate()) : undefined,
+        timezone: clientTimezone,
       };
       await onSubmit(submitPayload);
     } catch {

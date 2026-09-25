@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:proxy": "node tests/proxy-integration.cjs"
+    "test:proxy": "node tests/proxy-integration.cjs",
+    "test:date": "node --experimental-strip-types --test tests/date-utils.test.js"
   },
   "dependencies": {
     "axios": "^1.7.0",

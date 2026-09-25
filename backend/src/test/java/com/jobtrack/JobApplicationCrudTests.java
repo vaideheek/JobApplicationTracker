@@ -402,6 +402,96 @@ public class JobApplicationCrudTests {
 
     @Test
     @WithMockUser(username = "owner")
+    void testUpdateStatus_WithUserTimezone_FutureDateRejected() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .user(testUser)
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Tomorrow in America/New_York
+        LocalDate tomorrowInNewYork = LocalDate.now(ZoneId.of("America/New_York")).plusDays(1);
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.REJECTED)
+                .statusChangeDate(tomorrowInNewYork)
+                .timezone("America/New_York")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("Status change date cannot be in the future")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateStatus_WithUserTimezone_TodayAccepted() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .user(testUser)
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        // Today in America/New_York
+        LocalDate todayInNewYork = LocalDate.now(ZoneId.of("America/New_York"));
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.INTERVIEW)
+                .statusChangeDate(todayInNewYork)
+                .timezone("America/New_York")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INTERVIEW"));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void testUpdateStatus_WithInvalidTimezone_ReturnsBadRequest() throws Exception {
+        JobApplication app = JobApplication.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .user(testUser)
+                .status(ApplicationStatus.APPLIED)
+                .dateApplied(LocalDate.of(2026, 9, 1))
+                .build();
+        JobApplication saved = applicationRepository.save(app);
+
+        com.jobtrack.dto.JobApplicationRequest updateRequest = com.jobtrack.dto.JobApplicationRequest.builder()
+                .companyName("GammaCorp")
+                .jobTitle("Data Scientist")
+                .status(ApplicationStatus.INTERVIEW)
+                .statusChangeDate(LocalDate.now())
+                .timezone("Invalid/Unknown_Zone")
+                .build();
+
+        mockMvc.perform(put("/api/applications/" + saved.getId())
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(updateRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("Invalid timezone")));
+    }
+
+    @Test
+    @WithMockUser(username = "owner")
     void testCreateApplication_DirectlyInLaterStatus_WithoutStatusDate_OccurredOnIsNull() throws Exception {
         com.jobtrack.dto.JobApplicationRequest request = com.jobtrack.dto.JobApplicationRequest.builder()
                 .companyName("DeltaSystems")

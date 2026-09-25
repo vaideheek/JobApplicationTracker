@@ -1,7 +1,6 @@
-import { format } from 'date-fns';
 import { STATUS_LABELS } from '../types';
 import type { StatusHistoryEntry } from '../types';
-import { formatDateSafe } from '../utils/dateUtils';
+import { formatDateSafe, formatUtcDateTime } from '../utils/dateUtils';
 
 interface TimelineProps {
   entries: StatusHistoryEntry[];
@@ -58,7 +57,7 @@ export default function Timeline({ entries }: TimelineProps) {
               )}
               <span className="text-slate-400">
                 <span className="font-medium text-slate-500">Recorded in JobTrack on:</span>{' '}
-                {format(new Date(entry.changedAt), 'MMM d, yyyy · h:mm a')}
+                {formatUtcDateTime(entry.changedAt)}
               </span>
             </div>
           </div>
