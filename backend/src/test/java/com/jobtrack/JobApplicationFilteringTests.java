@@ -590,4 +590,13 @@ public class JobApplicationFilteringTests {
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].id").value(matching.getId()));
     }
+
+    @Test
+    @WithMockUser(username = "owner")
+    void test29_InvalidDocumentStateReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/applications")
+                .param("documentState", "INVALID_STATE"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", containsString("Unsupported document state: INVALID_STATE")));
+    }
 }

@@ -25,6 +25,7 @@ export default function ApplicationsList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [data, setData] = useState<PageResponse<JobApplication> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<JobApplication | null>(null);
   const requestIdRef = useRef(0);
   const { user } = useAuth();
@@ -73,11 +74,13 @@ export default function ApplicationsList() {
     // If date range is invalid (From > To), do not execute invalid query
     if (dateFrom && dateTo && dateFrom > dateTo) {
       setData(null);
+      setError(null);
       setLoading(false);
       return;
     }
 
     setLoading(true);
+    setError(null);
 
     try {
       const result = await jobApplicationApi.getAll({
@@ -120,9 +123,15 @@ export default function ApplicationsList() {
       }
 
       setData(result);
-    } catch (err) {
+    } catch (err: any) {
       if (currentRequestId === requestIdRef.current) {
         console.error('Failed to fetch applications:', err);
+        setData(null);
+        const errorMsg =
+          err?.response?.data?.message ||
+          err?.message ||
+          'Failed to load applications. Please try again.';
+        setError(errorMsg);
       }
     } finally {
       if (currentRequestId === requestIdRef.current) {
@@ -247,7 +256,7 @@ export default function ApplicationsList() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Applications</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {data ? `Showing ${showingStart}-${showingEnd} of ${data.totalElements} applications` : 'Loading...'}
+            {loading ? 'Loading...' : error ? 'Error loading applications' : data ? `Showing ${showingStart}-${showingEnd} of ${data.totalElements} applications` : 'Loading...'}
           </p>
         </div>
         {!isDemo && (
@@ -381,6 +390,20 @@ export default function ApplicationsList() {
         {loading ? (
           <div className="flex h-48 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+          </div>
+        ) : error ? (
+          <div className="px-6 py-16 text-center">
+            <div className="mx-auto max-w-md space-y-3">
+              <p className="text-base font-semibold text-rose-600">Failed to load applications</p>
+              <p className="text-sm text-slate-500">{error}</p>
+              <button
+                type="button"
+                onClick={() => fetchApplications()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-xs font-medium text-white hover:bg-brand-700 shadow-sm"
+              >
+                Retry
+              </button>
+            </div>
           </div>
         ) : !data || data.content.length === 0 ? (
           <div className="px-6 py-16 text-center">
