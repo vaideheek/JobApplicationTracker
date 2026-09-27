@@ -54,6 +54,13 @@ public class JobApplicationController {
             throw new IllegalArgumentException("Unsupported sort direction: " + sortDir);
         }
 
+        // Validate documentState
+        if (documentState != null && !documentState.isBlank() &&
+                !documentState.equalsIgnoreCase("HAS_DOCUMENTS") &&
+                !documentState.equalsIgnoreCase("NO_DOCUMENTS")) {
+            throw new IllegalArgumentException("Unsupported document state: " + documentState);
+        }
+
         // Validate size against strict supported values (15, 25, 50, 100)
         if (size != 15 && size != 25 && size != 50 && size != 100) {
             throw new IllegalArgumentException("Unsupported page size: " + size);
