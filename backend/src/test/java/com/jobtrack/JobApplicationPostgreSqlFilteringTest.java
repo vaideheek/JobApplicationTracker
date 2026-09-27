@@ -44,7 +44,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 @Testcontainers(disabledWithoutDocker = true)
 @EnabledIf("isDockerAvailable")
-public class JobApplicationPostgreSqlFilteringIT {
+public class JobApplicationPostgreSqlFilteringTest {
 
     static boolean isDockerAvailable() {
         try {
